@@ -26,7 +26,7 @@ function ArbitrageDetectorNodeComponent({ id, type, data, selected }: any) {
             <label className={labelClass}>Net of Fees</label>
             <div className="flex items-center h-[26px]">
               <label className="flex items-center gap-1 text-[10px] text-edge-muted/70">
-                <input type="checkbox" checked={config.net_of_fees ?? true} onChange={(e) => update("net_of_fees", e.target.checked)} className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06]" />
+                <input type="checkbox" checked={config.net_of_fees ?? true} onChange={(e) => update("net_of_fees", e.target.checked)} className="node-checkbox" />
                 Subtract fees
               </label>
             </div>

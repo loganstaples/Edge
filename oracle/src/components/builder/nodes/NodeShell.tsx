@@ -78,15 +78,15 @@ function NodeShellComponent({ id: _id, type, selected, status, flash, width = "w
         ${selected ? "ring-2 ring-accent-blue/60 ring-offset-1 ring-offset-edge-bg" : ""}
       `}
       style={{
-        background: `linear-gradient(145deg, rgba(17, 17, 19, 0.95) 0%, rgba(22, 22, 24, 0.85) 100%)`,
+        background: `linear-gradient(145deg, rgba(10, 10, 12, 0.97) 0%, rgba(14, 14, 16, 0.95) 100%)`,
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
-        border: flashActive ? `1px solid ${flashColor}` : `1px solid rgba(255, 255, 255, 0.05)`,
+        border: flashActive ? `1.5px solid ${flashColor}` : `1.5px solid rgba(255, 255, 255, 0.13)`,
         boxShadow: flashActive
           ? flashShadow
           : selected
-            ? `0 0 20px ${categoryColor}15, 0 4px 16px rgba(0,0,0,0.3)`
-            : `0 2px 12px rgba(0,0,0,0.25)`,
+            ? `0 0 20px rgba(255,255,255,0.06), 0 4px 16px rgba(0,0,0,0.4)`
+            : `0 2px 12px rgba(0,0,0,0.35)`,
         transition: "box-shadow 0.3s ease, border-color 0.3s ease",
       }}
     >
@@ -103,29 +103,21 @@ function NodeShellComponent({ id: _id, type, selected, status, flash, width = "w
         />
       )}
       <style>{`@keyframes flash-fade { 0% { opacity: 1; } 100% { opacity: 0; } }`}</style>
-      {/* Top accent line — always visible, subtle */}
+      {/* Subtle top highlight for depth */}
       <div
-        className="h-[2px] w-full"
+        className="h-[1px] w-full"
         style={{
-          background: `linear-gradient(90deg, transparent 5%, ${categoryColor}60 30%, ${categoryColor}80 50%, ${categoryColor}60 70%, transparent 95%)`,
-        }}
-      />
-
-      {/* Subtle inner glow from the top */}
-      <div
-        className="absolute top-0 left-0 right-0 h-12 pointer-events-none"
-        style={{
-          background: `radial-gradient(ellipse 80% 100% at 50% -20%, ${categoryColor}08 0%, transparent 70%)`,
+          background: `linear-gradient(90deg, transparent 10%, rgba(255, 255, 255, 0.08) 50%, transparent 90%)`,
         }}
       />
 
       {/* Header */}
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1 relative">
         <div
-          className="w-6 h-6 rounded-md flex items-center justify-center text-xs flex-shrink-0"
-          style={{ background: `${categoryColor}15` }}
+          className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
+          style={{ background: `${categoryColor}18` }}
         >
-          {def.icon}
+          <div className="w-2 h-2 rounded-full" style={{ background: categoryColor, boxShadow: `0 0 6px ${categoryColor}60` }} />
         </div>
         <span className="text-[11px] font-semibold text-edge-text/90 tracking-wide uppercase truncate">
           {def.label}
@@ -166,8 +158,8 @@ function NodeShellComponent({ id: _id, type, selected, status, flash, width = "w
             className="!w-3 !h-3 !rounded-full !border-0 transition-all duration-200 hover:!w-4 hover:!h-4 hover:!-ml-0.5"
             style={{
               top: `${offset}%`,
-              background: `rgba(255, 255, 255, 0.25)`,
-              boxShadow: `0 0 0 3px rgba(255, 255, 255, 0.08)`,
+              background: `${categoryColor}`,
+              boxShadow: `0 0 8px ${categoryColor}50`,
               cursor: "crosshair",
             }}
           />
@@ -216,7 +208,7 @@ export function ContextOnlyToggle({ checked, onChange }: { checked: boolean; onC
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06] accent-accent-blue cursor-pointer"
+        className="node-checkbox cursor-pointer"
       />
       <span className="group-hover:text-edge-muted transition-colors">Context only</span>
     </label>

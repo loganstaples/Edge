@@ -27,7 +27,7 @@ function CooldownGateNodeComponent({ id, type, data, selected }: any) {
           <input className={inputClass} type="number" min={1} max={100} value={config.max_triggers ?? 3} onChange={(e) => update("max_triggers", Number(e.target.value))} />
         </div>
         <label className="flex items-center gap-1.5 text-[10px] text-edge-muted/70">
-          <input type="checkbox" checked={config.reset_on_reversal ?? false} onChange={(e) => update("reset_on_reversal", e.target.checked)} className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06]" />
+          <input type="checkbox" checked={config.reset_on_reversal ?? false} onChange={(e) => update("reset_on_reversal", e.target.checked)} className="node-checkbox" />
           Reset on direction change
         </label>
         {lastOutput != null && (
