@@ -196,27 +196,57 @@ const ALLOWED_MODELS = [
   "claude-opus-4-6",
 ];
 
+const EDIT_STRATEGY_ADDENDUM = `
+
+EDIT MODE — you are modifying an existing strategy, NOT creating from scratch.
+
+You will receive the current strategy as JSON under "CURRENT STRATEGY:" in the user message. The user's prompt describes what changes they want.
+
+RULES FOR EDITING:
+- PRESERVE existing node IDs. Do not rename or regenerate IDs for nodes you keep.
+- PRESERVE existing connections that are still valid after your changes.
+- You may ADD new nodes (use ids like "node_new_1", "node_new_2", etc.).
+- You may REMOVE nodes by simply not including them in the output.
+- You may MODIFY node configs by changing their config fields.
+- You may ADD or REMOVE connections as needed.
+- You may REORDER or restructure the flow if the user asks.
+- Set positions to {"x": 0, "y": 0} for any new nodes — the system will re-layout everything.
+- Keep positions for existing nodes if their topology hasn't changed, otherwise set to {"x": 0, "y": 0}.
+- The name should be updated only if the user's change fundamentally alters what the strategy does. Otherwise keep the existing name.
+
+Output the COMPLETE modified strategy in the same JSON format (all nodes, all connections, name). Do NOT output only the diff — output the full final strategy.`;
+
 export async function POST(req: Request) {
-  const { prompt, model } = await req.json();
+  const { prompt, model, existingStrategy } = await req.json();
   if (!prompt) {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
   }
 
   const selectedModel = ALLOWED_MODELS.includes(model) ? model : "claude-haiku-4-5-20251001";
+  const isEditMode = existingStrategy && existingStrategy.nodes?.length > 0;
+
+  const systemPrompt = isEditMode
+    ? STRATEGY_GENERATION_SYSTEM + EDIT_STRATEGY_ADDENDUM
+    : STRATEGY_GENERATION_SYSTEM;
+
+  // Build the user message — include existing strategy context for edit mode
+  const userMessage = isEditMode
+    ? `CURRENT STRATEGY:\n${JSON.stringify(existingStrategy, null, 2)}\n\nREQUESTED CHANGES:\n${prompt}`
+    : prompt;
 
   const client = new Anthropic();
   // Haiku supports assistant prefill to force JSON; Sonnet/Opus do not
   const supportsPrefill = selectedModel.includes("haiku");
   const messages: Anthropic.MessageParam[] = supportsPrefill
-    ? [{ role: "user", content: prompt }, { role: "assistant", content: "{" }]
-    : [{ role: "user", content: prompt }];
+    ? [{ role: "user", content: userMessage }, { role: "assistant", content: "{" }]
+    : [{ role: "user", content: userMessage }];
 
   let message;
   try {
     message = await client.messages.create({
       model: selectedModel,
       max_tokens: 4096,
-      system: STRATEGY_GENERATION_SYSTEM,
+      system: systemPrompt,
       messages,
     });
   } catch (err: any) {

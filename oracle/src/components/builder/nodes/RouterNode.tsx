@@ -47,7 +47,7 @@ function RouterNodeComponent({ id, type, data, selected }: any) {
   };
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width="w-[260px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width="w-[260px]">
       <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
         {routes.map((route: Route, i: number) => (
           <div key={i} className="space-y-0.5">
@@ -76,7 +76,7 @@ function RouterNodeComponent({ id, type, data, selected }: any) {
               </div>
             )}
             <label className="flex items-center gap-1 pl-3 text-[9px] text-edge-dim">
-              <input type="checkbox" checked={route.is_default ?? false} onChange={(e) => updateRoute(i, "is_default", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={route.is_default ?? false} onChange={(e) => updateRoute(i, "is_default", e.target.checked)} className="node-checkbox" />
               Default
             </label>
           </div>

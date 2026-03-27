@@ -24,9 +24,15 @@ import { StrategyToolbar } from "./StrategyToolbar";
 import { AIPromptBar } from "./AIPromptBar";
 import { EmptyCanvas } from "./EmptyCanvas";
 import { DragFromPortMenu } from "./DragFromPortMenu";
+import { LiveStatsBar } from "./LiveStatsBar";
 import { useStrategy } from "@/hooks/useStrategy";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
+import { useWallet } from "@/hooks/useWallet";
+import { usePaymentStream } from "@/hooks/usePaymentStream";
 import { MiniActivityFeed } from "./MiniActivityFeed";
+import { PaymentModal } from "./PaymentModal";
+import { StreamIndicator } from "./StreamIndicator";
+import { TICK_COST_USDC } from "@/lib/payments/streams";
 
 type StrategyStatus = "draft" | "running" | "paused" | "stopped";
 
@@ -40,7 +46,7 @@ function getNextNodeId() {
 
 const defaultEdgeOptions = {
   animated: true,
-  style: { stroke: "#2a2a2e" },
+  style: { stroke: "#6b6b7b", strokeWidth: 2 },
 };
 
 function CanvasInner() {
@@ -51,6 +57,7 @@ function CanvasInner() {
   const [aiLoading] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
   const [turboMode, setTurboMode] = useState(false);
+  const [slowMode, setSlowMode] = useState(false);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const aiPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -63,20 +70,39 @@ function CanvasInner() {
   } | null>(null);
 
   const { strategy, isSaving, save, load, deploy, pause } = useStrategy();
+  const wallet = useWallet();
+  const paymentStream = usePaymentStream();
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const searchParams = useSearchParams();
 
-  const pollingInterval = turboMode ? 5000 : 30000;
-  const { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs } = useStrategyExecution(
+  // In slow mode, space ticks far enough apart so all node glows finish before the next tick
+  // Each node gets 1200ms stagger + 1800ms glow, so total animation ≈ nodes*1200 + 1800
+  const nodeCount = nodes.length || 1;
+  const pollingInterval = slowMode
+    ? Math.max(nodeCount * 1200 + 2500, 8000)
+    : turboMode ? 5000 : 30000;
+  const { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs, activeNodeIds, equityHistory, liveStats } = useStrategyExecution(
     strategy?.id ?? null,
     strategyStatus,
-    pollingInterval
+    pollingInterval,
+    slowMode
   );
 
-  // Apply node statuses and outputs from execution ticks
+  // Record payment tick when execution ticks happen
+  const prevTickCount = useRef(0);
+  useEffect(() => {
+    if (liveStats.tickCount > prevTickCount.current && paymentStream.stream?.status === "active") {
+      paymentStream.recordTick(TICK_COST_USDC);
+    }
+    prevTickCount.current = liveStats.tickCount;
+  }, [liveStats.tickCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Apply node statuses, outputs, and active state from execution ticks
   useEffect(() => {
     const hasStatuses = nodeStatuses && Object.keys(nodeStatuses).length > 0;
     const hasOutputs = nodeOutputs && Object.keys(nodeOutputs).length > 0;
-    if (!hasStatuses && !hasOutputs) return;
+    const hasActive = activeNodeIds.size > 0;
+    if (!hasStatuses && !hasOutputs && !hasActive) return;
     setNodes((nds) =>
       nds.map((n) => ({
         ...n,
@@ -84,10 +110,11 @@ function CanvasInner() {
           ...n.data,
           ...(hasStatuses ? { status: nodeStatuses[n.id] || "idle" } : {}),
           ...(hasOutputs && nodeOutputs[n.id] ? { lastOutput: nodeOutputs[n.id] } : {}),
+          isActive: activeNodeIds.has(n.id),
         },
       }))
     );
-  }, [nodeStatuses, nodeOutputs, setNodes]);
+  }, [nodeStatuses, nodeOutputs, activeNodeIds, setNodes]);
 
   // Load strategy from URL param on mount
   useEffect(() => {
@@ -272,7 +299,7 @@ function CanvasInner() {
             sourceHandle: prevDef.handles.outputs[0],
             targetHandle: def.handles.inputs[0],
             animated: true,
-            style: { stroke: "#2a2a2e" },
+            style: { stroke: "#6b6b7b", strokeWidth: 2 },
           });
         }
 
@@ -327,16 +354,32 @@ function CanvasInner() {
   }, [strategyName, nodes, edges, save]);
 
   const handleDeploy = useCallback(async () => {
+    // Show payment modal — user must connect wallet and confirm stream
+    setShowPaymentModal(true);
+  }, []);
+
+  const handleConfirmDeploy = useCallback(async () => {
+    setShowPaymentModal(false);
     // Auto-save before deploying so strategy.id is set
     await handleSave();
+    // Start payment stream
+    if (wallet.address && strategy?.id) {
+      await paymentStream.startStream(strategy.id, wallet.address, pollingInterval);
+    }
     await deploy();
     setStrategyStatus("running");
-  }, [deploy, handleSave]);
+  }, [deploy, handleSave, wallet.address, strategy?.id, paymentStream, pollingInterval]);
 
   const handlePause = useCallback(async () => {
+    await paymentStream.pauseStream();
     await pause();
     setStrategyStatus("paused");
-  }, [pause]);
+  }, [pause, paymentStream]);
+
+  const handleStop = useCallback(async () => {
+    await paymentStream.stopStream();
+    setStrategyStatus("stopped");
+  }, [paymentStream]);
 
   const handleStrategyGenerated = useCallback(
     (generatedNodes: any[], connections: any[], name?: string) => {
@@ -379,12 +422,30 @@ function CanvasInner() {
         status={strategyStatus}
         isSaving={isSaving}
         turboMode={turboMode}
+        slowMode={slowMode}
         onNameChange={setStrategyName}
         onSave={handleSave}
         onDeploy={handleDeploy}
         onPause={handlePause}
-        onToggleTurbo={() => setTurboMode((t) => !t)}
+        onToggleTurbo={() => { setTurboMode((t) => !t); if (!turboMode) setSlowMode(false); }}
+        onToggleSlow={() => { setSlowMode((s) => !s); if (!slowMode) setTurboMode(false); }}
+        onStop={handleStop}
+        stream={paymentStream.stream}
+        walletBalance={wallet.balance}
+        walletConnected={wallet.isConnected}
+        walletAddress={wallet.address}
+        onConnectWallet={wallet.connect}
+        onDisconnectWallet={wallet.disconnect}
       />
+      {/* Live stats bar — visible when strategy is running */}
+      {(strategyStatus === "running" || strategyStatus === "paused") && liveStats.tickCount > 0 && (
+        <LiveStatsBar
+          stats={liveStats}
+          equityHistory={equityHistory}
+          isExecuting={isExecuting}
+        />
+      )}
+
       <div className="flex-1 min-h-0 min-w-0 relative" ref={reactFlowWrapper}>
         <NodePalette />
           {strategyLoading && (
@@ -407,7 +468,7 @@ function CanvasInner() {
             onInit={setRfInstance}
             nodeTypes={nodeTypeComponents}
             defaultEdgeOptions={defaultEdgeOptions}
-            connectionLineStyle={{ stroke: "#63636e", strokeWidth: 2, strokeDasharray: "6 3" }}
+            connectionLineStyle={{ stroke: "#9b9bb0", strokeWidth: 2, strokeDasharray: "6 3" }}
             fitView
             proOptions={{ hideAttribution: true }}
             className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""}`}
@@ -461,6 +522,9 @@ function CanvasInner() {
               onStrategyGenerated={handleStrategyGenerated}
               isLoading={aiLoading}
               inputRef={aiPromptRef}
+              existingNodes={nodes}
+              existingEdges={edges}
+              strategyName={strategyName}
             />
           </div>
 
@@ -478,6 +542,17 @@ function CanvasInner() {
         logs={logs}
         isExecuting={isExecuting}
         totalPnl={totalPnl}
+      />
+      <PaymentModal
+        isOpen={showPaymentModal}
+        walletAddress={wallet.address}
+        walletBalance={wallet.balance}
+        isConnected={wallet.isConnected}
+        isConnecting={wallet.isConnecting}
+        pollingIntervalMs={pollingInterval}
+        onConnect={wallet.connect}
+        onConfirm={handleConfirmDeploy}
+        onCancel={() => setShowPaymentModal(false)}
       />
     </div>
   );

@@ -112,5 +112,21 @@ export function initializeDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_strategies_public ON strategies(is_public);
     CREATE INDEX IF NOT EXISTS idx_execution_log_strategy ON execution_log(strategy_id);
     CREATE INDEX IF NOT EXISTS idx_simulated_trades_strategy ON simulated_trades(strategy_id);
+
+    CREATE TABLE IF NOT EXISTS payment_streams (
+      id TEXT PRIMARY KEY,
+      strategy_id TEXT REFERENCES strategies(id),
+      wallet_address TEXT NOT NULL,
+      flow_rate TEXT NOT NULL,
+      token TEXT DEFAULT 'USDC',
+      total_streamed REAL DEFAULT 0.0,
+      status TEXT DEFAULT 'active',
+      started_at TEXT DEFAULT (datetime('now')),
+      last_tick_at TEXT,
+      stopped_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_payment_streams_strategy ON payment_streams(strategy_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_streams_wallet ON payment_streams(wallet_address);
   `);
 }

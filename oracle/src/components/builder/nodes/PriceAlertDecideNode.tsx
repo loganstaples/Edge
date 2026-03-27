@@ -9,7 +9,7 @@ function PriceAlertDecideNodeComponent({ id, type, data, selected }: any) {
   const triggered = lastOutput?.pa_triggered ?? false;
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status}>
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Condition</label>

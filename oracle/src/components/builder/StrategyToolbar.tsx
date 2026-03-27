@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, KeyboardEvent } from "react";
 import Link from "next/link";
+import type { StreamInfo } from "@/hooks/usePaymentStream";
 
 type StrategyStatus = "draft" | "running" | "paused" | "stopped";
 
@@ -10,11 +11,20 @@ interface StrategyToolbarProps {
   status: StrategyStatus;
   isSaving?: boolean;
   turboMode: boolean;
+  slowMode: boolean;
   onNameChange: (name: string) => void;
   onSave: () => void;
   onDeploy: () => void;
   onPause: () => void;
+  onStop?: () => void;
   onToggleTurbo: () => void;
+  onToggleSlow: () => void;
+  stream?: StreamInfo | null;
+  walletBalance?: number;
+  walletConnected?: boolean;
+  walletAddress?: string | null;
+  onConnectWallet?: () => void;
+  onDisconnectWallet?: () => void;
 }
 
 const statusConfig: Record<StrategyStatus, { label: string; color: string; bg: string; glow: string }> = {
@@ -44,7 +54,7 @@ const statusConfig: Record<StrategyStatus, { label: string; color: string; bg: s
   },
 };
 
-export function StrategyToolbar({ name, status, isSaving, turboMode, onNameChange, onSave, onDeploy, onPause, onToggleTurbo }: StrategyToolbarProps) {
+export function StrategyToolbar({ name, status, isSaving, turboMode, slowMode, onNameChange, onSave, onDeploy, onPause, onStop, onToggleTurbo, onToggleSlow, stream, walletBalance = 0, walletConnected, walletAddress, onConnectWallet, onDisconnectWallet }: StrategyToolbarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -164,25 +174,86 @@ export function StrategyToolbar({ name, status, isSaving, turboMode, onNameChang
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2">
-          {status === "running" && (
+          {/* Stream indicator */}
+          {stream && stream.status !== "stopped" && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-edge-border" style={{ background: "rgba(255,255,255,0.03)" }}>
+              <span className="relative flex h-1.5 w-1.5">
+                {stream.status === "active" && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-40" />
+                )}
+                <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${stream.status === "paused" ? "bg-accent-amber" : "bg-accent-green"}`} />
+              </span>
+              <span className="text-xs font-mono text-white">{stream.totalStreamed.toFixed(4)}</span>
+              <span className="text-xs text-edge-dim">USDC</span>
+            </div>
+          )}
+
+          {/* Wallet button */}
+          {walletConnected ? (
             <button
-              onClick={onToggleTurbo}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all duration-200 ${
-                turboMode
-                  ? "border-accent-cyan/30 text-accent-cyan bg-accent-cyan/10"
-                  : "border-edge-border text-edge-muted hover:text-edge-text-2"
-              }`}
+              onClick={onDisconnectWallet}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-edge-border text-edge-text-2 bg-edge-surface hover:border-edge-border-2 transition-colors"
+              title={walletAddress || ""}
             >
-              {turboMode ? "⚡ Turbo" : "⚡"}
+              <span className="w-1.5 h-1.5 rounded-full bg-accent-green" />
+              <span className="font-mono">{walletAddress?.slice(0, 4)}...{walletAddress?.slice(-4)}</span>
+              <span className="text-edge-dim">{walletBalance.toFixed(2)}</span>
+            </button>
+          ) : (
+            <button
+              onClick={onConnectWallet}
+              className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-edge-border text-edge-muted hover:text-white hover:border-edge-border-2 transition-colors"
+            >
+              Connect Wallet
             </button>
           )}
+
+          <div className="w-px h-5 bg-edge-border" />
+
           {status === "running" && (
-            <button
-              onClick={onPause}
-              className="px-2.5 py-1.5 text-xs font-medium text-accent-amber rounded-lg border border-accent-amber/20 bg-accent-amber/10 hover:bg-accent-amber/15 transition-colors"
-            >
-              Pause
-            </button>
+            <div className="flex items-center rounded-lg border border-edge-border overflow-hidden">
+              <button
+                onClick={onToggleSlow}
+                className={`px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${
+                  slowMode
+                    ? "text-accent-purple bg-accent-purple/12 border-r border-accent-purple/20"
+                    : "text-edge-muted hover:text-edge-text-2 border-r border-edge-border"
+                }`}
+                title="Slow mode — step through nodes visually"
+              >
+                Slow
+              </button>
+              <button
+                onClick={onToggleTurbo}
+                className={`px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${
+                  turboMode
+                    ? "text-accent-cyan bg-accent-cyan/12"
+                    : slowMode
+                      ? "text-edge-dim"
+                      : "text-edge-muted hover:text-edge-text-2"
+                }`}
+                disabled={slowMode}
+                title="Turbo mode — faster tick polling"
+              >
+                Turbo
+              </button>
+            </div>
+          )}
+          {status === "running" && (
+            <>
+              <button
+                onClick={onPause}
+                className="px-2.5 py-1.5 text-xs font-medium text-accent-amber rounded-lg border border-accent-amber/20 bg-accent-amber/10 hover:bg-accent-amber/15 transition-colors"
+              >
+                Pause
+              </button>
+              <button
+                onClick={onStop}
+                className="px-2.5 py-1.5 text-xs font-medium text-accent-red rounded-lg border border-accent-red/20 bg-accent-red/10 hover:bg-accent-red/15 transition-colors"
+              >
+                Stop
+              </button>
+            </>
           )}
           <button
             onClick={onSave}

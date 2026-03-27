@@ -10,7 +10,7 @@ function AIAnalystNodeComponent({ id, type, data, selected }: any) {
   const [showReasoning, setShowReasoning] = useState(false);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width={expanded ? "w-[320px]" : "w-[260px]"}>
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width={expanded ? "w-[320px]" : "w-[260px]"}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Instruction</label>
@@ -43,7 +43,7 @@ function AIAnalystNodeComponent({ id, type, data, selected }: any) {
           </div>
         </div>
         <label className="flex items-center gap-1.5 text-[10px] text-edge-muted/70">
-          <input type="checkbox" checked={config.structured ?? true} onChange={(e) => update("structured", e.target.checked)} className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06]" />
+          <input type="checkbox" checked={config.structured ?? true} onChange={(e) => update("structured", e.target.checked)} className="node-checkbox" />
           Structured output
         </label>
         {lastOutput?.analyst_probability != null && (

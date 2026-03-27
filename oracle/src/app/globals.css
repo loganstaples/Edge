@@ -130,6 +130,43 @@ select:focus {
   transition: color 0.2s ease;
 }
 
+/* ─── Custom node checkbox ─── */
+.node-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.node-checkbox:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.node-checkbox:checked {
+  background: rgba(129, 140, 248, 0.8);
+  border-color: rgba(129, 140, 248, 0.9);
+}
+
+.node-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 3.5px;
+  width: 3px;
+  height: 6px;
+  border: solid white;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
 /* ─── Sparkline glow ─── */
 .sparkline-svg {
   filter: drop-shadow(0px 0px 4px rgba(52, 211, 153, 0.5));

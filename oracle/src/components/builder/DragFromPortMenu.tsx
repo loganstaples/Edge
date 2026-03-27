@@ -60,7 +60,7 @@ export function DragFromPortMenu({ position, sourceCategory, onSelect, onClose }
               onClick={() => { onSelect(item.types); onClose(); }}
               className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-edge-surface-2 transition-colors"
             >
-              <span className="text-sm">{def?.icon}</span>
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: def?.color ?? '#888', boxShadow: `0 0 6px ${def?.color ?? '#888'}60` }} />
               <span className="text-xs text-edge-text">{item.label}</span>
               {item.types.length > 1 && (
                 <span className="text-[9px] text-accent-blue ml-auto">combo</span>
