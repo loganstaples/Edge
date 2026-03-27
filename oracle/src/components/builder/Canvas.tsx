@@ -125,7 +125,7 @@ function CanvasInner() {
     const id = searchParams.get("id");
     if (id) {
       setStrategyLoading(true);
-      load(id, wallet.address)
+      load(id, wallet.address, wallet.signMessage)
         .then((result) => {
           if (result) {
             setNodes(result.nodes);
@@ -358,7 +358,7 @@ function CanvasInner() {
       return;
     }
     const isNew = !strategy?.id;
-    const id = await save(strategyName, nodes, edges, wallet.address);
+    const id = await save(strategyName, nodes, edges, wallet.address, wallet.signMessage);
     window.history.replaceState(null, "", `?id=${id}`);
 
     // Mint NFT for new strategies
