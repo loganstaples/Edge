@@ -174,3 +174,50 @@ select:focus {
 .sparkline-svg-red {
   filter: drop-shadow(0px 0px 4px rgba(248, 113, 113, 0.5));
 }
+
+/* ─── AI streaming node animations ─── */
+
+/* Entrance: nodes fade + scale in as they are parsed from the stream */
+.react-flow__node.streaming-node-enter > div {
+  animation: nodeStreamIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes nodeStreamIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(10px);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Settle: nodes glide smoothly to their final auto-layout positions */
+.streaming-settle .react-flow__node {
+  transition: transform 0.65s cubic-bezier(0.25, 1, 0.5, 1) !important;
+}
+
+/* Edges fade in during settle */
+.streaming-settle .react-flow__edge path,
+.streaming-settle .react-flow__edge circle {
+  animation: edgeStreamIn 0.45s ease-out both;
+}
+
+@keyframes edgeStreamIn {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 40;
+  }
+  100% {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Hide edges during active streaming (before settle) */
+.streaming-edges-enter .react-flow__edge {
+  opacity: 0;
+}

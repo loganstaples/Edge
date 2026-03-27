@@ -37,6 +37,9 @@ interface PhantomProvider {
   publicKey: { toBase58(): string; toString(): string } | null;
   connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: { toBase58(): string } }>;
   disconnect(): Promise<void>;
+  signAndSendTransaction(transaction: any, options?: any): Promise<{ signature: string }>;
+  signTransaction(transaction: any): Promise<any>;
+  signMessage(message: Uint8Array): Promise<{ signature: Uint8Array }>;
   on(event: string, callback: (...args: any[]) => void): void;
   off(event: string, callback: (...args: any[]) => void): void;
 }
@@ -161,5 +164,24 @@ export function useWallet() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { ...wallet, connect, disconnect, refreshBalance: () => wallet.address ? refreshBalance(wallet.address) : Promise.resolve() };
+  const signAndSendTransaction = useCallback(async (transaction: any): Promise<{ signature: string }> => {
+    const phantom = getPhantom();
+    if (!phantom) throw new Error("Phantom wallet not found");
+    return phantom.signAndSendTransaction(transaction);
+  }, []);
+
+  const signMessage = useCallback(async (message: Uint8Array): Promise<{ signature: Uint8Array }> => {
+    const phantom = getPhantom();
+    if (!phantom) throw new Error("Phantom wallet not found");
+    return phantom.signMessage(message);
+  }, []);
+
+  return {
+    ...wallet,
+    connect,
+    disconnect,
+    signAndSendTransaction,
+    signMessage,
+    refreshBalance: () => wallet.address ? refreshBalance(wallet.address) : Promise.resolve(),
+  };
 }

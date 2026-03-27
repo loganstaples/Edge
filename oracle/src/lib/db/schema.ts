@@ -129,4 +129,23 @@ export function initializeDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_payment_streams_strategy ON payment_streams(strategy_id);
     CREATE INDEX IF NOT EXISTS idx_payment_streams_wallet ON payment_streams(wallet_address);
   `);
+
+  // --- Migrations: add ownership columns to strategies ---
+  const cols = db.prepare("PRAGMA table_info(strategies)").all() as any[];
+  const colNames = new Set(cols.map((c: any) => c.name));
+  if (!colNames.has("owner_wallet")) {
+    db.exec("ALTER TABLE strategies ADD COLUMN owner_wallet TEXT");
+  }
+  if (!colNames.has("nft_mint")) {
+    db.exec("ALTER TABLE strategies ADD COLUMN nft_mint TEXT");
+  }
+  if (!colNames.has("encrypted_data")) {
+    db.exec("ALTER TABLE strategies ADD COLUMN encrypted_data TEXT");
+  }
+  if (!colNames.has("zg_root_hash")) {
+    db.exec("ALTER TABLE strategies ADD COLUMN zg_root_hash TEXT");
+  }
+
+  // Indexes for fast lookups
+  db.exec("CREATE INDEX IF NOT EXISTS idx_strategies_owner ON strategies(owner_wallet)");
 }
