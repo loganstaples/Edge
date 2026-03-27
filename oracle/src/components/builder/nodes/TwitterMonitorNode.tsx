@@ -47,11 +47,11 @@ function TwitterMonitorNodeComponent({ id, type, data, selected }: any) {
         </div>
         <div className="flex gap-2">
           <label className="flex items-center gap-1 text-[10px] text-edge-muted/70">
-            <input type="checkbox" checked={config.verified_only ?? false} onChange={(e) => update("verified_only", e.target.checked)} className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06]" />
+            <input type="checkbox" checked={config.verified_only ?? false} onChange={(e) => update("verified_only", e.target.checked)} className="node-checkbox" />
             Verified only
           </label>
           <label className="flex items-center gap-1 text-[10px] text-edge-muted/70">
-            <input type="checkbox" checked={config.exclude_retweets ?? true} onChange={(e) => update("exclude_retweets", e.target.checked)} className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06]" />
+            <input type="checkbox" checked={config.exclude_retweets ?? true} onChange={(e) => update("exclude_retweets", e.target.checked)} className="node-checkbox" />
             No RTs
           </label>
         </div>

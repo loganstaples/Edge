@@ -40,7 +40,7 @@ function getNextNodeId() {
 
 const defaultEdgeOptions = {
   animated: true,
-  style: { stroke: "#2a2a2e" },
+  style: { stroke: "#6b6b7b", strokeWidth: 2 },
 };
 
 function CanvasInner() {
@@ -272,7 +272,7 @@ function CanvasInner() {
             sourceHandle: prevDef.handles.outputs[0],
             targetHandle: def.handles.inputs[0],
             animated: true,
-            style: { stroke: "#2a2a2e" },
+            style: { stroke: "#6b6b7b", strokeWidth: 2 },
           });
         }
 
@@ -407,7 +407,7 @@ function CanvasInner() {
             onInit={setRfInstance}
             nodeTypes={nodeTypeComponents}
             defaultEdgeOptions={defaultEdgeOptions}
-            connectionLineStyle={{ stroke: "#63636e", strokeWidth: 2, strokeDasharray: "6 3" }}
+            connectionLineStyle={{ stroke: "#9b9bb0", strokeWidth: 2, strokeDasharray: "6 3" }}
             fitView
             proOptions={{ hideAttribution: true }}
             className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""}`}

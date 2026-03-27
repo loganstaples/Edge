@@ -43,7 +43,7 @@ function AIAnalystNodeComponent({ id, type, data, selected }: any) {
           </div>
         </div>
         <label className="flex items-center gap-1.5 text-[10px] text-edge-muted/70">
-          <input type="checkbox" checked={config.structured ?? true} onChange={(e) => update("structured", e.target.checked)} className="w-3 h-3 rounded bg-white/[0.04] border border-white/[0.06]" />
+          <input type="checkbox" checked={config.structured ?? true} onChange={(e) => update("structured", e.target.checked)} className="node-checkbox" />
           Structured output
         </label>
         {lastOutput?.analyst_probability != null && (

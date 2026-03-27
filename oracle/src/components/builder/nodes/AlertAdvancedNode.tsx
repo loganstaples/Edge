@@ -24,19 +24,19 @@ function AlertAdvancedNodeComponent({ id, type, data, selected }: any) {
           <label className={labelClass}>Channels</label>
           <div className="flex flex-wrap gap-1.5">
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.ch_app ?? true} onChange={(e) => update("ch_app", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.ch_app ?? true} onChange={(e) => update("ch_app", e.target.checked)} className="node-checkbox" />
               In-App
             </label>
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.ch_sms ?? false} onChange={(e) => update("ch_sms", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.ch_sms ?? false} onChange={(e) => update("ch_sms", e.target.checked)} className="node-checkbox" />
               SMS
             </label>
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.ch_discord ?? false} onChange={(e) => update("ch_discord", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.ch_discord ?? false} onChange={(e) => update("ch_discord", e.target.checked)} className="node-checkbox" />
               Discord
             </label>
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.ch_email ?? false} onChange={(e) => update("ch_email", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.ch_email ?? false} onChange={(e) => update("ch_email", e.target.checked)} className="node-checkbox" />
               Email
             </label>
           </div>
