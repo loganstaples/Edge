@@ -27,7 +27,12 @@ import { DragFromPortMenu } from "./DragFromPortMenu";
 import { LiveStatsBar } from "./LiveStatsBar";
 import { useStrategy } from "@/hooks/useStrategy";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
+import { useWallet } from "@/hooks/useWallet";
+import { usePaymentStream } from "@/hooks/usePaymentStream";
 import { MiniActivityFeed } from "./MiniActivityFeed";
+import { PaymentModal } from "./PaymentModal";
+import { StreamIndicator } from "./StreamIndicator";
+import { TICK_COST_USDC } from "@/lib/payments/streams";
 
 type StrategyStatus = "draft" | "running" | "paused" | "stopped";
 
@@ -65,6 +70,9 @@ function CanvasInner() {
   } | null>(null);
 
   const { strategy, isSaving, save, load, deploy, pause } = useStrategy();
+  const wallet = useWallet();
+  const paymentStream = usePaymentStream();
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const searchParams = useSearchParams();
 
   // In slow mode, space ticks far enough apart so all node glows finish before the next tick
@@ -79,6 +87,15 @@ function CanvasInner() {
     pollingInterval,
     slowMode
   );
+
+  // Record payment tick when execution ticks happen
+  const prevTickCount = useRef(0);
+  useEffect(() => {
+    if (liveStats.tickCount > prevTickCount.current && paymentStream.stream?.status === "active") {
+      paymentStream.recordTick(TICK_COST_USDC);
+    }
+    prevTickCount.current = liveStats.tickCount;
+  }, [liveStats.tickCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply node statuses, outputs, and active state from execution ticks
   useEffect(() => {
@@ -337,16 +354,32 @@ function CanvasInner() {
   }, [strategyName, nodes, edges, save]);
 
   const handleDeploy = useCallback(async () => {
+    // Show payment modal — user must connect wallet and confirm stream
+    setShowPaymentModal(true);
+  }, []);
+
+  const handleConfirmDeploy = useCallback(async () => {
+    setShowPaymentModal(false);
     // Auto-save before deploying so strategy.id is set
     await handleSave();
+    // Start payment stream
+    if (wallet.address && strategy?.id) {
+      await paymentStream.startStream(strategy.id, wallet.address, pollingInterval);
+    }
     await deploy();
     setStrategyStatus("running");
-  }, [deploy, handleSave]);
+  }, [deploy, handleSave, wallet.address, strategy?.id, paymentStream, pollingInterval]);
 
   const handlePause = useCallback(async () => {
+    await paymentStream.pauseStream();
     await pause();
     setStrategyStatus("paused");
-  }, [pause]);
+  }, [pause, paymentStream]);
+
+  const handleStop = useCallback(async () => {
+    await paymentStream.stopStream();
+    setStrategyStatus("stopped");
+  }, [paymentStream]);
 
   const handleStrategyGenerated = useCallback(
     (generatedNodes: any[], connections: any[], name?: string) => {
@@ -396,6 +429,13 @@ function CanvasInner() {
         onPause={handlePause}
         onToggleTurbo={() => { setTurboMode((t) => !t); if (!turboMode) setSlowMode(false); }}
         onToggleSlow={() => { setSlowMode((s) => !s); if (!slowMode) setTurboMode(false); }}
+        onStop={handleStop}
+        stream={paymentStream.stream}
+        walletBalance={wallet.balance}
+        walletConnected={wallet.isConnected}
+        walletAddress={wallet.address}
+        onConnectWallet={wallet.connect}
+        onDisconnectWallet={wallet.disconnect}
       />
       {/* Live stats bar — visible when strategy is running */}
       {(strategyStatus === "running" || strategyStatus === "paused") && liveStats.tickCount > 0 && (
@@ -502,6 +542,17 @@ function CanvasInner() {
         logs={logs}
         isExecuting={isExecuting}
         totalPnl={totalPnl}
+      />
+      <PaymentModal
+        isOpen={showPaymentModal}
+        walletAddress={wallet.address}
+        walletBalance={wallet.balance}
+        isConnected={wallet.isConnected}
+        isConnecting={wallet.isConnecting}
+        pollingIntervalMs={pollingInterval}
+        onConnect={wallet.connect}
+        onConfirm={handleConfirmDeploy}
+        onCancel={() => setShowPaymentModal(false)}
       />
     </div>
   );
