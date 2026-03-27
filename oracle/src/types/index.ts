@@ -315,6 +315,8 @@ export interface Strategy {
   name: string;
   description: string | null;
   authorName: string;
+  ownerWallet: string | null;
+  nftMint: string | null;
   nodes: StrategyNode[];
   connections: StrategyConnection[];
   status: StrategyStatus;
