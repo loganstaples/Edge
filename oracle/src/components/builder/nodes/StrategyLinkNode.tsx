@@ -16,7 +16,7 @@ function StrategyLinkNodeComponent({ id, type, data, selected }: any) {
   }, []);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status}>
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Linked Strategy</label>

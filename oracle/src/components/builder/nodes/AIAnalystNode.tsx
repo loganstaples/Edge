@@ -10,7 +10,7 @@ function AIAnalystNodeComponent({ id, type, data, selected }: any) {
   const [showReasoning, setShowReasoning] = useState(false);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width={expanded ? "w-[320px]" : "w-[260px]"}>
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width={expanded ? "w-[320px]" : "w-[260px]"}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Instruction</label>
