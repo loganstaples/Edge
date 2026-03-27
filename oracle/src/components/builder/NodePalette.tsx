@@ -208,13 +208,13 @@ export function NodePalette() {
                       }}
                     >
                       <div
-                        className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-sm"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                         style={{
                           background: `${node.color}12`,
                           border: `1px solid ${node.color}18`,
                         }}
                       >
-                        {node.icon}
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: node.color, boxShadow: `0 0 6px ${node.color}60` }} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[11px] font-medium text-edge-text/90 group-hover:text-white truncate transition-colors">

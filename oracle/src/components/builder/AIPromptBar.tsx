@@ -8,6 +8,9 @@ interface AIPromptBarProps {
   onStrategyGenerated: (nodes: any[], connections: any[], name?: string) => void;
   isLoading: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement>;
+  existingNodes?: any[];
+  existingEdges?: any[];
+  strategyName?: string;
 }
 
 // idle     → no color border, just subtle static border
@@ -23,7 +26,8 @@ const MODELS = [
   { id: "claude-opus-4-6", label: "Opus 4.6", desc: "Best" },
 ] as const;
 
-export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIPromptBarProps) {
+export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef, existingNodes, existingEdges, strategyName }: AIPromptBarProps) {
+  const hasExistingStrategy = (existingNodes?.length ?? 0) > 0;
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,10 +168,32 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
     setError(null);
 
     try {
+      // Build the request body — include existing strategy for edit mode
+      const body: Record<string, any> = { prompt: prompt.trim(), model: selectedModel };
+      if (hasExistingStrategy && existingNodes && existingEdges) {
+        body.existingStrategy = {
+          name: strategyName || "Untitled Strategy",
+          nodes: existingNodes.map((n: any) => ({
+            id: n.id,
+            type: n.type,
+            category: n.data?.category,
+            position: n.position,
+            config: n.data?.config ?? {},
+          })),
+          connections: existingEdges.map((e: any) => ({
+            id: e.id,
+            source_id: e.source,
+            source_handle: e.sourceHandle ?? "output",
+            target_id: e.target,
+            target_handle: e.targetHandle ?? "input",
+          })),
+        };
+      }
+
       const res = await fetch("/api/ai/generate-strategy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim(), model: selectedModel }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -311,7 +337,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
                 onKeyDown={handleKeyDown}
                 onFocus={handleFocus}
                 onBlur={handleBlur}
-                placeholder="Describe a trading strategy..."
+                placeholder={hasExistingStrategy ? "Describe changes to your strategy..." : "Describe a trading strategy..."}
                 disabled={isSubmitting}
                 rows={1}
                 className={`w-full bg-transparent text-sm focus:outline-none focus:ring-0 border-none outline-none disabled:opacity-50 resize-none overflow-y-auto transition-colors duration-200 ${isFocused ? "ai-placeholder-bright" : "ai-placeholder-dim"}`}
@@ -423,7 +449,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
                         : "1px solid rgba(255, 255, 255, 0.08)",
                 }}
               >
-                {isSubmitting ? "Building..." : "Build"}
+                {isSubmitting ? (hasExistingStrategy ? "Editing..." : "Building...") : (hasExistingStrategy ? "Edit" : "Build")}
               </button>
             </div>
 

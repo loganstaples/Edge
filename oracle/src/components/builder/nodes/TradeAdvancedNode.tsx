@@ -19,7 +19,7 @@ function TradeAdvancedNodeComponent({ id, type, data, selected }: any) {
   }, [recentTrades]);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} flash={flash} width="w-[260px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} flash={flash} width="w-[260px]">
       <div className="space-y-1.5">
         <div className="flex gap-1.5">
           <div className="flex-1">
@@ -68,15 +68,15 @@ function TradeAdvancedNodeComponent({ id, type, data, selected }: any) {
           <label className={labelClass}>Position Rules</label>
           <div className="space-y-0.5">
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.only_new ?? true} onChange={(e) => update("only_new", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.only_new ?? true} onChange={(e) => update("only_new", e.target.checked)} className="node-checkbox" />
               Only enter if no position
             </label>
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.auto_close ?? false} onChange={(e) => update("auto_close", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.auto_close ?? false} onChange={(e) => update("auto_close", e.target.checked)} className="node-checkbox" />
               Close when edge turns negative
             </label>
             <label className="flex items-center gap-1 text-[9px] text-edge-muted/70">
-              <input type="checkbox" checked={config.scale_in ?? false} onChange={(e) => update("scale_in", e.target.checked)} className="w-2.5 h-2.5" />
+              <input type="checkbox" checked={config.scale_in ?? false} onChange={(e) => update("scale_in", e.target.checked)} className="node-checkbox" />
               Scale in on growing edge
             </label>
           </div>
