@@ -5,89 +5,86 @@ import { ExecutionLogEntry } from "@/types";
 
 interface Props {
   strategyId: string;
+  pollInterval?: number;
 }
 
-export function ExecutionLog({ strategyId }: Props) {
+export function ExecutionLog({ strategyId, pollInterval = 0 }: Props) {
   const [logs, setLogs] = useState<ExecutionLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const fetchLogs = () => {
+      fetch(`/api/strategies/${strategyId}/logs`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data) => setLogs(Array.isArray(data) ? data : []))
+        .catch(() => setLogs([]))
+        .finally(() => setLoading(false));
+    };
     setLoading(true);
-    fetch(`/api/strategies/${strategyId}/logs`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setLogs(Array.isArray(data) ? data : []))
-      .catch(() => setLogs([]))
-      .finally(() => setLoading(false));
-  }, [strategyId]);
+    fetchLogs();
+    if (pollInterval > 0) {
+      const id = setInterval(fetchLogs, pollInterval);
+      return () => clearInterval(id);
+    }
+  }, [strategyId, pollInterval]);
 
   if (loading) {
     return (
-      <div className="animate-pulse text-edge-muted text-sm py-6 text-center">
-        Loading execution log...
+      <div className="space-y-2">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-8 rounded bg-white/[0.03] animate-pulse" style={{ animationDelay: `${i * 100}ms` }} />
+        ))}
       </div>
     );
   }
 
   if (logs.length === 0) {
     return (
-      <div className="text-edge-muted text-sm py-6 text-center">
-        No execution logs yet.
+      <div className="flex flex-col items-center py-8">
+        <p className="text-sm text-edge-text-2">No execution logs yet</p>
+        <p className="text-2xs text-edge-muted mt-1">Logs will appear when the strategy runs.</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
+    <div className="w-full overflow-x-auto">
+      <table className="w-full border-collapse">
         <thead>
-          <tr className="text-edge-muted uppercase tracking-widest">
-            <th className="text-left py-2 px-3 text-[10px] font-semibold">
-              Timestamp
-            </th>
-            <th className="text-left py-2 px-3 text-[10px] font-semibold">
-              Trade
-            </th>
-            <th className="text-left py-2 px-3 text-[10px] font-semibold">
-              Details
-            </th>
-            <th className="text-right py-2 px-3 text-[10px] font-semibold">
-              P&L Delta
-            </th>
+          <tr>
+            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Timestamp</th>
+            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Trade</th>
+            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Details</th>
+            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-right">P&L Delta</th>
           </tr>
         </thead>
         <tbody>
-          {/* Separator line */}
-          <tr>
-            <td colSpan={4} className="p-0">
-              <div className="h-[1px] bg-white/[0.04]" />
-            </td>
-          </tr>
           {logs.map((log) => (
             <tr
               key={log.id}
-              className="hover:bg-white/[0.02] transition-colors"
+              className="border-b border-edge-border hover:bg-white/[0.02] transition-colors"
             >
-              <td className="py-2 px-3 text-edge-text-2 font-mono whitespace-nowrap text-[10px]">
+              <td className="px-4 py-3 text-sm text-edge-text-2 font-mono whitespace-nowrap">
                 {new Date(log.timestamp).toLocaleString()}
               </td>
-              <td className="py-2 px-3">
+              <td className="px-4 py-3">
                 <span
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm ${
                     log.tradePlaced
-                      ? "bg-accent-green/15 text-accent-green"
-                      : "bg-white/[0.04] text-edge-muted"
+                      ? "border border-accent-green/30 text-accent-green"
+                      : "bg-white/[0.06] text-edge-muted"
                   }`}
                 >
                   {log.tradePlaced ? "YES" : "NO"}
                 </span>
               </td>
-              <td className="py-2 px-3 text-edge-text-2 max-w-[200px] truncate text-[10px]">
+              <td className="px-4 py-3 text-sm text-edge-text-2 max-w-[200px] truncate">
                 {log.tradeDetails
                   ? `${log.tradeDetails.direction ?? ""} ${log.tradeDetails.marketId ?? ""}`
                   : "—"}
               </td>
               <td
-                className={`py-2 px-3 text-right font-mono font-medium text-[10px] ${
+                className={`px-4 py-3 text-right font-mono text-sm ${
                   log.pnlDelta > 0
                     ? "text-accent-green"
                     : log.pnlDelta < 0

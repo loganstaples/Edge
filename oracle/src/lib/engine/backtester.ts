@@ -8,6 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { fetchAllActiveGeminiEvents, fetchGeminiTicker } from "@/lib/data/gemini";
 import { fetchActivePolymarkets } from "@/lib/data/polymarket";
 import { getRecentArticles } from "@/lib/db/queries";
+import { fetchHistoricalNews } from "@/lib/data/news";
 import { computeEdge } from "./edge";
 
 // ---------------------------------------------------------------------------
@@ -277,6 +278,7 @@ Return ONLY valid JSON:
   "confidence": "low"|"medium"|"high",
   "reasoning": "2-3 sentence explanation referencing base rates and key evidence",
   "key_factors": ["factor1", "factor2", ...],
+  "search_terms": "2-4 keywords to find related prediction markets (e.g., 'trump election 2028', 'bitcoin price')",
   "base_rate_reference": "brief note on what base rate was used",
   "strongest_counter": "the strongest argument against this probability"
 }`,
@@ -292,13 +294,14 @@ Return ONLY valid JSON:
       ai_reasoning: parsed.reasoning ?? "",
       key_factors: keyFactors,
       key_factor_count: keyFactors.length,
+      search_terms: parsed.search_terms ?? "",
       base_rate_reference: parsed.base_rate_reference ?? "",
       strongest_counter: parsed.strongest_counter ?? "",
     };
     aiCache.set(cacheKey, result);
     return result;
   } catch {
-    const fallback = { ai_probability: 0.5, ai_confidence: "low", ai_reasoning: "AI call failed", key_factors: [], key_factor_count: 0 };
+    const fallback = { ai_probability: 0.5, ai_confidence: "low", ai_reasoning: "AI call failed", key_factors: [], key_factor_count: 0, search_terms: "" };
     aiCache.set(cacheKey, fallback);
     return fallback;
   }
@@ -332,7 +335,7 @@ async function cachedSentiment(text: string): Promise<Record<string, any>> {
   }
 }
 
-async function cachedAICustom(prompt: string, riverStr: string): Promise<Record<string, any>> {
+async function _cachedAICustom(prompt: string, riverStr: string): Promise<Record<string, any>> {
   const cacheKey = `custom:${prompt.slice(0, 50)}:${riverStr.slice(0, 50)}`;
   if (aiCache.has(cacheKey)) return aiCache.get(cacheKey)!;
 
@@ -367,7 +370,7 @@ async function cachedAICustom(prompt: string, riverStr: string): Promise<Record<
 
 interface Condition { field: string; operator: string; value: string | number }
 
-function evalCondition(c: Condition, river: River): boolean {
+function _evalCondition(c: Condition, river: River): boolean {
   const v = river[c.field];
   if (v === undefined || v === null) return false;
   const target = typeof v === "number" ? Number(c.value) : c.value;
@@ -384,7 +387,7 @@ function evalCondition(c: Condition, river: River): boolean {
   }
 }
 
-function runEdgeCalc(river: River): Record<string, any> {
+function _runEdgeCalc(river: River): Record<string, any> {
   const aiProb = river.ai_probability;
   const marketPrice = river.price;
   if (aiProb == null || marketPrice == null) {
@@ -440,6 +443,7 @@ function runLogicNode(node: StrategyNode, river: River): Record<string, any> {
   // Edge calculator, arb_detector, router, price_alert_decide, multi_condition_gate
   // all use _gate_result — delegate to real runner
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runLogicNode: realRunner } = require("./node-runners/logic-nodes");
     return realRunner(node, river);
   } catch {
@@ -543,7 +547,130 @@ function priceAt(history: { t: number; p: number }[], ts: number): number | null
 }
 
 // ---------------------------------------------------------------------------
-// 7. Main backtest runner
+// 7. Reactive data source runner for backtests
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a reactive data source (one with upstream inputs) during backtest replay.
+ * Uses upstream search_terms from the river to find matching markets, then
+ * returns their historical price at the current tick timestamp.
+ */
+async function _runReactiveSource(
+  node: StrategyNode,
+  river: River,
+  tickTs: number,
+  startTs: number,
+  endTs: number,
+  polymarketPool: any[],
+  geminiPool: any[],
+  hCache: Map<string, { t: number; p: number }[]>,
+  allMarkets: HistoricalMarket[],
+): Promise<Record<string, any>> {
+  // Resolve search terms: upstream search_terms > static node config
+  const searchTerms =
+    river.search_terms ?? river.search_query ?? river.query ??
+    node.config.market_search ?? node.config.event_search ?? node.config.keywords ?? "";
+
+  if (!searchTerms || typeof searchTerms !== "string" || !searchTerms.trim()) {
+    return { _item_count: 0 };
+  }
+
+  const maxResults = node.config.max_results ?? 5;
+  const keywords = searchTerms.toLowerCase().split(/\s+/).filter(Boolean);
+
+  if (node.type === "polymarket_feed") {
+    const filtered = polymarketPool
+      .filter((m) => {
+        const text = (m.question ?? "").toLowerCase();
+        return keywords.some((kw: string) => text.includes(kw));
+      })
+      .slice(0, maxResults);
+
+    const results: Record<string, any>[] = [];
+    for (const m of filtered) {
+      const yesToken = m.tokens?.find((t: any) => t.outcome === "Yes");
+      const tokenId = yesToken?.token_id || m.condition_id;
+
+      let history = hCache.get(tokenId);
+      if (!history) {
+        history = await fetchPolymarketHistory(tokenId, startTs, endTs);
+        hCache.set(tokenId, history);
+      }
+
+      const price = priceAt(history, tickTs);
+      if (price == null) continue;
+
+      // Register market so position tracking / exit logic can find it
+      if (!allMarkets.some((am) => am.marketId === tokenId)) {
+        allMarkets.push({ eventTitle: m.question, marketId: tokenId, platform: "polymarket", category: m.tags?.[0] || "general", history });
+      }
+
+      results.push({
+        event_title: m.question,
+        market_id: tokenId,
+        platform: "polymarket",
+        price,
+        yes_price: price,
+        no_price: parseFloat((1 - price).toFixed(4)),
+        bid: Math.max(0.01, price - 0.005),
+        ask: Math.min(0.99, price + 0.005),
+        spread: 0.01,
+        volume_24h: 0,
+      });
+    }
+
+    if (results.length === 0) return { _item_count: 0 };
+    return { ...results[0], available_markets: results, available_market_count: results.length, _item_count: results.length };
+  }
+
+  if (node.type === "gemini_markets_feed") {
+    const filtered = geminiPool
+      .filter((e) => {
+        const text = (e.title ?? "").toLowerCase();
+        return keywords.some((kw: string) => text.includes(kw));
+      })
+      .slice(0, maxResults);
+
+    const results: Record<string, any>[] = [];
+    for (const e of filtered) {
+      const contract = e.contracts?.[0];
+      if (!contract) continue;
+      const symbol = contract.instrumentSymbol;
+
+      let history = hCache.get(symbol);
+      if (!history) {
+        history = await fetchGeminiHistory(symbol);
+        hCache.set(symbol, history);
+      }
+
+      const price = priceAt(history, tickTs);
+      if (price == null) continue;
+
+      if (!allMarkets.some((am) => am.marketId === symbol)) {
+        allMarkets.push({ eventTitle: e.title, marketId: symbol, platform: "gemini", category: e.category || "general", history });
+      }
+
+      results.push({
+        event_title: e.title,
+        market_id: symbol,
+        platform: "gemini",
+        price,
+        contract_price: price,
+        bid_price: Math.max(0.01, price - 0.005),
+        ask_price: Math.min(0.99, price + 0.005),
+        spread: 0.01,
+      });
+    }
+
+    if (results.length === 0) return { _item_count: 0 };
+    return { ...results[0], available_markets: results, available_market_count: results.length, _item_count: results.length };
+  }
+
+  return { _item_count: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// 8. Main backtest runner
 // ---------------------------------------------------------------------------
 
 export async function runBacktest(
@@ -570,8 +697,21 @@ export async function runBacktest(
 
   // --- Phase 1: Discover real markets & fetch historical prices ---
   const sorted = topoSort(strategy.nodes, strategy.connections);
-  const sourceNodes = sorted.filter((n) => n.category === "data");
-  const downstream = sorted.filter((n) => n.category !== "data");
+
+  // Distinguish standalone data sources (entry points with no upstream) from
+  // reactive data sources (e.g., polymarket_feed driven by AI search_terms).
+  // Matches the live executor's split so backtests reflect real execution.
+  const incomingCount = new Map<string, number>();
+  for (const n of sorted) incomingCount.set(n.id, 0);
+  for (const c of strategy.connections) {
+    incomingCount.set(c.target_id, (incomingCount.get(c.target_id) ?? 0) + 1);
+  }
+  const sourceNodes = sorted.filter(
+    (n) => n.category === "data" && (incomingCount.get(n.id) ?? 0) === 0,
+  );
+  const downstream = sorted.filter(
+    (n) => n.category !== "data" || (incomingCount.get(n.id) ?? 0) > 0,
+  );
 
   const allMarkets: HistoricalMarket[] = [];
   const marketsBySource: Record<string, HistoricalMarket[]> = {};
@@ -584,8 +724,44 @@ export async function runBacktest(
     }
   }
 
-  // For news_feed nodes, load real articles from the DB
-  const articles = getRecentArticles(100);
+  // Fetch real historical news for the backtest period.
+  // Pulls from NewsAPI /everything with the strategy's keywords and date range.
+  // Falls back to DB articles if NewsAPI returns nothing.
+  // Collect keywords from all news source nodes and convert to OR query for NewsAPI.
+  // Strategy keywords are space/comma separated; NewsAPI needs explicit " OR " joins.
+  const newsKeywords = sourceNodes
+    .filter((n) => n.type === "news_monitor" || n.type === "news_feed")
+    .flatMap((n) => (n.config.keywords ?? "").split(/[\s,]+/).filter(Boolean))
+    .filter((v, i, a) => a.indexOf(v) === i) // dedupe
+    .join(" OR ");
+  const startDate = new Date(startTs * 1000).toISOString().slice(0, 10);
+  const endDate = new Date(endTs * 1000).toISOString().slice(0, 10);
+  const historicalArticles = await fetchHistoricalNews({
+    keywords: newsKeywords,
+    from: startDate,
+    to: endDate,
+    pageSize: 50,
+  });
+  // Map to same shape as DB articles, fall back to DB if API returns nothing
+  const articles = historicalArticles.length > 0
+    ? historicalArticles.map((a) => ({
+        id: "",
+        title: a.title,
+        description: a.description ?? "",
+        source: a.source,
+        url: a.url ?? "",
+        publishedAt: a.publishedAt,
+        category: a.category ?? "",
+        processed: false,
+        createdAt: a.publishedAt,
+      }))
+    : getRecentArticles(100);
+
+  // Pre-fetch active market lists for reactive data source searches.
+  // Fetched once, filtered per-tick using upstream search_terms.
+  const polymarketSearchPool = await fetchActivePolymarkets(2).catch(() => [] as any[]);
+  const geminiSearchPool = await fetchAllActiveGeminiEvents().catch(() => [] as any[]);
+  const historyCache = new Map<string, { t: number; p: number }[]>();
 
   // --- Phase 2: Pre-fetch AI estimates (cached, one call per unique event) ---
   // Identify which AI node types are in the graph
@@ -787,8 +963,14 @@ export async function runBacktest(
 
         let outputs: Record<string, any> = {};
 
+        // --- Reactive data sources: search markets using upstream context ---
+        if (node.category === "data") {
+          outputs = await _runReactiveSource(
+            node, builtRiver, tickTs, startTs, endTs,
+            polymarketSearchPool, geminiSearchPool, historyCache, allMarkets,
+          );
         // --- AI nodes: use cached real Claude calls ---
-        if (node.category === "ai") {
+        } else if (node.category === "ai") {
           switch (node.type) {
             case "ai_analyst":
             case "ai_estimate": {
@@ -801,6 +983,7 @@ export async function runBacktest(
                   analyst_confidence: result.ai_confidence,
                   analyst_direction: result.ai_probability != null ? (result.ai_probability > 0.55 ? "bullish" : result.ai_probability < 0.45 ? "bearish" : "neutral") : "neutral",
                   analyst_reasoning: result.ai_reasoning,
+                  search_terms: result.search_terms,
                 };
               } else {
                 outputs = result;
@@ -825,6 +1008,7 @@ export async function runBacktest(
             default: {
               // For consensus, history_tracker, formula — delegate to real runner
               try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
                 const { runAINode: realAIRunner } = require("./node-runners/ai-nodes");
                 outputs = await realAIRunner(node, builtRiver);
               } catch {
@@ -870,7 +1054,7 @@ export async function runBacktest(
           }
         }
 
-        outputMap[node.id] = outputs;
+        outputMap[node.id] = { ...builtRiver, ...outputs };
       }
     }
 

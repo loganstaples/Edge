@@ -1,15 +1,25 @@
 "use client";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { NodeShell, useNodeConfig, selectClass, inputClass, labelClass } from "./NodeShell";
 
 function TradeAdvancedNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
   const update = useNodeConfig(id);
   const lastOutput = data?.lastOutput;
-  const recentTrades = lastOutput?.ta_recent_trades ?? [];
+  const recentTrades: any[] = useMemo(() => lastOutput?.ta_recent_trades ?? [], [lastOutput?.ta_recent_trades]);
+
+  // Determine flash state from most recent trade
+  const flash = useMemo(() => {
+    if (!recentTrades.length) return null;
+    const latest = recentTrades[recentTrades.length - 1];
+    // Only flash if the trade happened in the last 5 seconds
+    const tradeAge = Date.now() - new Date(latest.timestamp).getTime();
+    if (tradeAge > 5000) return null;
+    return latest.direction === "sell" ? "sell" as const : "buy" as const;
+  }, [recentTrades]);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width="w-[260px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} flash={flash} width="w-[260px]">
       <div className="space-y-1.5">
         <div className="flex gap-1.5">
           <div className="flex-1">

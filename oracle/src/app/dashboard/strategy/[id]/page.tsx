@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Header } from "@/components/Header";
@@ -10,34 +11,35 @@ import { ExecutionLog } from "@/components/dashboard/ExecutionLog";
 import { TradeHistory } from "@/components/dashboard/TradeHistory";
 import { BacktestPanel } from "@/components/dashboard/BacktestPanel";
 import { nodeTypeComponents } from "@/components/builder/nodes";
+import { useStrategyExecution } from "@/hooks/useStrategyExecution";
 import type { Strategy, StrategyPerformance } from "@/types";
 
 type DetailTab = "overview" | "logs" | "backtest";
 
-const statusStyles: Record<string, { label: string; bg: string; glow: string; color: string }> = {
-  running: { label: "Live", bg: "rgba(52, 211, 153, 0.12)", glow: "0 0 8px rgba(52, 211, 153, 0.3)", color: "text-accent-green" },
-  paused: { label: "Paused", bg: "rgba(251, 191, 36, 0.12)", glow: "none", color: "text-accent-amber" },
-  draft: { label: "Draft", bg: "rgba(90, 95, 122, 0.15)", glow: "none", color: "text-edge-muted" },
-  stopped: { label: "Stopped", bg: "rgba(248, 113, 113, 0.12)", glow: "none", color: "text-accent-red" },
+const statusStyles: Record<string, { label: string; badgeClass: string; glow: string }> = {
+  running: { label: "Live", badgeClass: "text-accent-green border-accent-green/30", glow: "0 0 8px rgba(52, 211, 153, 0.3)" },
+  paused: { label: "Paused", badgeClass: "text-accent-amber border-accent-amber/30", glow: "none" },
+  draft: { label: "Draft", badgeClass: "text-edge-muted border-edge-border", glow: "none" },
+  stopped: { label: "Stopped", badgeClass: "text-accent-red border-accent-red/30", glow: "none" },
 };
 
-function StrategyCanvas({ strategy }: { strategy: Strategy }) {
-  const nodes = strategy.nodes.map((n) => ({
+function StrategyCanvas({ strategy, nodeStatuses }: { strategy: Strategy; nodeStatuses: Record<string, string> }) {
+  const nodes = useMemo(() => strategy.nodes.map((n) => ({
     id: n.id,
     type: n.type,
     position: n.position,
-    data: { config: n.config },
-  }));
+    data: { config: n.config, status: nodeStatuses[n.id] ?? "idle" },
+  })), [strategy.nodes, nodeStatuses]);
 
-  const edges = strategy.connections.map((c) => ({
+  const edges = useMemo(() => strategy.connections.map((c) => ({
     id: c.id,
     source: c.source_id,
     target: c.target_id,
     sourceHandle: c.source_handle,
     targetHandle: c.target_handle,
-    animated: true,
-    style: { stroke: "#2A2A3E" },
-  }));
+    animated: strategy.status === "running",
+    style: { stroke: "#3a3f55" },
+  })), [strategy.connections, strategy.status]);
 
   return (
     <ReactFlow
@@ -56,7 +58,7 @@ function StrategyCanvas({ strategy }: { strategy: Strategy }) {
 
 export default function StrategyDetailPage() {
   const params = useParams();
-  const router = useRouter();
+  const _router = useRouter();
   const id = params.id as string;
 
   const [strategy, setStrategy] = useState<Strategy | null>(null);
@@ -79,6 +81,12 @@ export default function StrategyDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const { logs: _executionLogs, isExecuting, nodeStatuses } = useStrategyExecution(
+    strategy?.id ?? null,
+    strategy?.status ?? "draft",
+    30000
+  );
+
   const handleAction = async (action: "deploy" | "pause" | "stop") => {
     setActionLoading(true);
     try {
@@ -93,8 +101,10 @@ export default function StrategyDetailPage() {
     return (
       <div className="min-h-screen bg-edge-bg text-edge-text">
         <Header />
-        <main className="max-w-7xl mx-auto px-5 py-8">
-          <div className="rounded-xl h-64 animate-shimmer" style={{ background: "linear-gradient(135deg, rgba(14,16,24,0.8) 0%, rgba(20,22,32,0.6) 100%)", border: "1px solid rgba(255,255,255,0.04)" }} />
+        <main className="max-w-7xl mx-auto px-6 py-8 space-y-5">
+          <div className="h-4 w-32 rounded bg-white/[0.03] animate-pulse" />
+          <div className="bg-edge-surface border border-edge-border rounded-lg h-48 animate-pulse" />
+          <div className="glass rounded-lg h-96 animate-pulse" style={{ animationDelay: "150ms" }} />
         </main>
       </div>
     );
@@ -104,9 +114,20 @@ export default function StrategyDetailPage() {
     return (
       <div className="min-h-screen bg-edge-bg text-edge-text">
         <Header />
-        <main className="max-w-7xl mx-auto px-5 py-8 text-center">
-          <p className="text-edge-muted mb-4">Strategy not found</p>
-          <Link href="/dashboard" className="text-accent-blue hover:underline text-sm">Back to Dashboard</Link>
+        <main className="max-w-7xl mx-auto px-6 py-8">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center justify-center py-16"
+          >
+            <p className="text-sm font-medium text-edge-text-2 mb-4">Strategy not found</p>
+            <Link
+              href="/dashboard"
+              className="px-4 py-2 rounded-lg bg-edge-surface border border-edge-border text-sm text-edge-text hover:text-white transition-colors"
+            >
+              Back to Dashboard
+            </Link>
+          </motion.div>
         </main>
       </div>
     );
@@ -116,181 +137,173 @@ export default function StrategyDetailPage() {
   const pnl = perf?.totalPnl ?? 0;
   const winRate = perf && perf.totalTrades > 0 ? ((perf.winningTrades / perf.totalTrades) * 100).toFixed(1) : "—";
 
-  const tabs: { key: DetailTab; label: string; accent: string }[] = [
-    { key: "overview", label: "Overview", accent: "rgba(129, 140, 248, 0.15)" },
-    { key: "logs", label: "Live Activity", accent: "rgba(129, 140, 248, 0.15)" },
-    { key: "backtest", label: "Backtest", accent: "rgba(34, 211, 238, 0.15)" },
+  const tabs: { key: DetailTab; label: string }[] = [
+    { key: "overview", label: "Overview" },
+    { key: "logs", label: "Live Activity" },
+    { key: "backtest", label: "Backtest" },
   ];
 
   return (
     <div className="min-h-screen bg-edge-bg text-edge-text">
       <Header />
 
-      <main className="max-w-7xl mx-auto px-5 py-8 space-y-5 animate-fade-in">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-[11px] text-edge-muted">
-          <Link href="/dashboard" className="hover:text-edge-text transition-colors">Dashboard</Link>
-          <span className="text-edge-dim">/</span>
-          <span className="text-edge-text">{strategy.name}</span>
-        </div>
-
-        {/* Header panel */}
-        <div
-          className="relative rounded-xl overflow-hidden p-5"
-          style={{
-            background: "linear-gradient(135deg, rgba(14,16,24,0.85) 0%, rgba(20,22,32,0.65) 100%)",
-            backdropFilter: "blur(16px)",
-            border: "1px solid rgba(255,255,255,0.05)",
-          }}
+      <main className="max-w-7xl mx-auto px-6 py-8 space-y-5">
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
+          className="space-y-5"
         >
-          <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: "linear-gradient(90deg, transparent 5%, rgba(129,140,248,0.4) 30%, rgba(167,139,250,0.5) 50%, rgba(129,140,248,0.4) 70%, transparent 95%)" }} />
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-1.5 text-sm">
+            <Link href="/dashboard" className="text-edge-muted hover:text-edge-text-2 transition-colors">Dashboard</Link>
+            <span className="text-edge-dim">/</span>
+            <span className="text-white">{strategy.name}</span>
+          </nav>
 
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-xl font-semibold text-edge-text truncate">{strategy.name}</h1>
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-widest shrink-0 ${status.color}`}
-                  style={{ background: status.bg, boxShadow: status.glow }}
-                >
-                  {strategy.status === "running" && (
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-50" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
+          {/* Header panel */}
+          <div className="glass relative overflow-hidden rounded-lg p-6">
+            <div className="gradient-top-edge" />
+
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex items-start gap-4">
+                <div className="w-12 h-12 rounded-lg bg-white/[0.06] flex items-center justify-center shrink-0">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3 mb-1">
+                    <h1 className="text-xl font-semibold text-white truncate">{strategy.name}</h1>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border shrink-0 ${status.badgeClass}`}
+                      style={{ boxShadow: status.glow }}
+                    >
+                      {strategy.status === "running" && (
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-75" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green" />
+                        </span>
+                      )}
+                      {status.label}
                     </span>
+                  </div>
+                  {strategy.description && (
+                    <p className="text-2xs text-edge-muted mb-2">{strategy.description}</p>
                   )}
-                  {status.label}
+                  <div className="flex items-center gap-4 text-2xs text-edge-dim font-mono">
+                    <span>{strategy.nodes.length} nodes</span>
+                    <span>{strategy.connections.length} connections</span>
+                    <span>Created {new Date(strategy.createdAt).toLocaleDateString()}</span>
+                  </div>
                 </div>
               </div>
-              {strategy.description && (
-                <p className="text-[12px] text-edge-muted mb-3">{strategy.description}</p>
-              )}
-              <div className="flex items-center gap-1.5 text-[10px] text-edge-dim">
-                <span>{strategy.nodes.length} nodes</span>
-                <span>·</span>
-                <span>{strategy.connections.length} connections</span>
-                <span>·</span>
-                <span>Created {new Date(strategy.createdAt).toLocaleDateString()}</span>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                {isExecuting && (
+                  <span className="text-2xs text-accent-green animate-pulse mr-1 font-mono">Executing...</span>
+                )}
+                <Link
+                  href={`/?id=${strategy.id}`}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-edge-surface border border-edge-border text-sm text-edge-text hover:border-edge-border-2 hover:text-white transition-colors"
+                >
+                  Edit in Builder
+                </Link>
+                {strategy.status === "draft" || strategy.status === "stopped" || strategy.status === "paused" ? (
+                  <button
+                    onClick={() => handleAction("deploy")}
+                    disabled={actionLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-green/10 border border-accent-green/20 text-sm text-accent-green font-medium hover:bg-accent-green/15 transition-colors disabled:opacity-50"
+                  >
+                    {strategy.status === "paused" ? "Resume" : "Deploy"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleAction("pause")}
+                    disabled={actionLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-amber/10 border border-accent-amber/20 text-sm text-accent-amber font-medium hover:bg-accent-amber/15 transition-colors disabled:opacity-50"
+                  >
+                    Pause
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2 shrink-0">
-              <Link
-                href={`/?id=${strategy.id}`}
-                className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-accent-blue transition-all hover:scale-[1.02] active:scale-[0.98]"
-                style={{ background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.2)" }}
+            {/* Stats row — HELIX-style internal blocks */}
+            <div className="grid grid-cols-4 gap-3 mt-5">
+              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
+                <p className="text-2xs text-edge-muted">P&L</p>
+                <p className={`text-lg font-mono font-light ${pnl >= 0 ? "text-accent-green" : "text-accent-red"}`}>
+                  {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
+                </p>
+              </div>
+              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
+                <p className="text-2xs text-edge-muted">Trades</p>
+                <p className="text-lg font-mono font-light text-white">{perf?.totalTrades ?? 0}</p>
+              </div>
+              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
+                <p className="text-2xs text-edge-muted">Win Rate</p>
+                <p className="text-lg font-mono font-light text-white">{winRate}{winRate !== "—" && "%"}</p>
+              </div>
+              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
+                <p className="text-2xs text-edge-muted">Sharpe</p>
+                <p className="text-lg font-mono font-light text-white">{perf?.sharpeRatio?.toFixed(2) ?? "—"}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Tab bar — spring-physics animated */}
+          <div className="flex items-center gap-1 p-1 bg-edge-bg rounded-lg border border-edge-border w-fit">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`relative flex items-center px-4 py-1.5 rounded-md text-sm transition-all ${
+                  tab === t.key ? "text-white" : "text-edge-muted hover:text-edge-text-2"
+                }`}
               >
-                Edit in Builder
-              </Link>
-              {strategy.status === "draft" || strategy.status === "stopped" || strategy.status === "paused" ? (
-                <button
-                  onClick={() => handleAction("deploy")}
-                  disabled={actionLoading}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-accent-green transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-                  style={{ background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)" }}
-                >
-                  {strategy.status === "paused" ? "Resume" : "Deploy"}
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleAction("pause")}
-                  disabled={actionLoading}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-accent-amber transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-                  style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.2)" }}
-                >
-                  Pause
-                </button>
-              )}
-            </div>
+                {tab === t.key && (
+                  <motion.div
+                    layoutId="detail-tab-bg"
+                    className="absolute inset-0 bg-edge-surface border border-edge-border rounded-md"
+                    transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <span className="relative z-10">{t.label}</span>
+              </button>
+            ))}
           </div>
 
-          {/* Stats row */}
-          <div className="grid grid-cols-4 gap-4 mt-5 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-edge-muted mb-1">P&L</div>
-              <div className={`text-lg font-mono font-semibold ${pnl >= 0 ? "text-accent-green" : "text-accent-red"}`}>
-                {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
+          {/* Tab content */}
+          {tab === "overview" && (
+            <div className="glass relative overflow-hidden rounded-lg" style={{ height: "500px" }}>
+              <div className="gradient-top-edge" />
+              <ReactFlowProvider>
+                <StrategyCanvas strategy={strategy} nodeStatuses={nodeStatuses} />
+              </ReactFlowProvider>
+            </div>
+          )}
+
+          {tab === "logs" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
+                <h3 className="text-2xs font-mono uppercase tracking-wider text-edge-muted mb-4">Execution Log</h3>
+                <ExecutionLog strategyId={id} pollInterval={strategy.status === "running" ? 10000 : 0} />
+              </div>
+              <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
+                <h3 className="text-2xs font-mono uppercase tracking-wider text-edge-muted mb-4">Trade History</h3>
+                <TradeHistory strategyId={id} pollInterval={strategy.status === "running" ? 10000 : 0} />
               </div>
             </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-edge-muted mb-1">Trades</div>
-              <div className="text-lg font-mono font-semibold text-edge-text">{perf?.totalTrades ?? 0}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-edge-muted mb-1">Win Rate</div>
-              <div className="text-lg font-mono font-semibold text-edge-text">{winRate}{winRate !== "—" && "%"}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-edge-muted mb-1">Sharpe</div>
-              <div className="text-lg font-mono font-semibold text-edge-text">{perf?.sharpeRatio?.toFixed(2) ?? "—"}</div>
-            </div>
-          </div>
-        </div>
+          )}
 
-        {/* Tab bar */}
-        <div className="flex items-center gap-1">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-widest transition-all ${
-                tab === t.key ? "bg-white/[0.06] text-edge-text" : "text-edge-muted hover:text-edge-text hover:bg-white/[0.02]"
-              }`}
-              style={tab === t.key ? { border: `1px solid ${t.accent}`, boxShadow: `0 0 8px ${t.accent.replace("0.15", "0.06")}` } : { border: "1px solid transparent" }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        {tab === "overview" && (
-          <div
-            className="relative rounded-xl overflow-hidden"
-            style={{
-              background: "linear-gradient(135deg, rgba(14,16,24,0.85) 0%, rgba(20,22,32,0.65) 100%)",
-              border: "1px solid rgba(255,255,255,0.05)",
-              height: "500px",
-            }}
-          >
-            <div className="absolute top-0 left-0 right-0 h-[1px]" style={{ background: "linear-gradient(90deg, transparent 10%, rgba(129,140,248,0.3) 50%, transparent 90%)" }} />
-            <ReactFlowProvider>
-              <StrategyCanvas strategy={strategy} />
-            </ReactFlowProvider>
-          </div>
-        )}
-
-        {tab === "logs" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div
-              className="relative rounded-xl overflow-hidden p-5"
-              style={{ background: "linear-gradient(135deg, rgba(14,16,24,0.85) 0%, rgba(20,22,32,0.65) 100%)", border: "1px solid rgba(255,255,255,0.05)" }}
-            >
-              <div className="absolute top-0 left-0 right-0 h-[1px]" style={{ background: "linear-gradient(90deg, transparent 10%, rgba(129,140,248,0.3) 50%, transparent 90%)" }} />
-              <h3 className="text-[10px] uppercase tracking-widest text-edge-muted font-semibold mb-4">Execution Log</h3>
-              <ExecutionLog strategyId={id} />
+          {tab === "backtest" && (
+            <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
+              <BacktestPanel strategyId={id} />
             </div>
-            <div
-              className="relative rounded-xl overflow-hidden p-5"
-              style={{ background: "linear-gradient(135deg, rgba(14,16,24,0.85) 0%, rgba(20,22,32,0.65) 100%)", border: "1px solid rgba(255,255,255,0.05)" }}
-            >
-              <div className="absolute top-0 left-0 right-0 h-[1px]" style={{ background: "linear-gradient(90deg, transparent 10%, rgba(167,139,250,0.3) 50%, transparent 90%)" }} />
-              <h3 className="text-[10px] uppercase tracking-widest text-edge-muted font-semibold mb-4">Trade History</h3>
-              <TradeHistory strategyId={id} />
-            </div>
-          </div>
-        )}
-
-        {tab === "backtest" && (
-          <div
-            className="relative rounded-xl overflow-hidden p-5"
-            style={{ background: "linear-gradient(135deg, rgba(14,16,24,0.85) 0%, rgba(20,22,32,0.65) 100%)", border: "1px solid rgba(255,255,255,0.05)" }}
-          >
-            <div className="absolute top-0 left-0 right-0 h-[1px]" style={{ background: "linear-gradient(90deg, transparent 10%, rgba(34,211,238,0.3) 50%, transparent 90%)" }} />
-            <BacktestPanel strategyId={id} />
-          </div>
-        )}
+          )}
+        </motion.div>
       </main>
     </div>
   );

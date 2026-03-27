@@ -94,6 +94,36 @@ function AlertAdvancedNodeComponent({ id, type, data, selected }: any) {
           </div>
         </div>
 
+        {/* Live message preview */}
+        {(config.message_template ?? "").length > 0 && (
+          <div className="pt-1 mt-0.5" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+            <label className={labelClass}>Preview</label>
+            <div className="text-[9px] text-edge-text/80 bg-white/[0.03] rounded px-1.5 py-1 leading-relaxed break-words">
+              {(() => {
+                let preview = config.message_template ?? "";
+                const liveData: Record<string, string> = {
+                  event_name: lastOutput?.aa_message ? "Live data" : "Fed Rate Decision 2026",
+                  edge_value: "7.2%",
+                  probability: "68%",
+                  confidence: "high",
+                  price: "61¢",
+                  direction: "bullish",
+                  reasoning: "Multiple Fed officials signal hawkish stance",
+                  timestamp: new Date().toLocaleTimeString(),
+                };
+                // Use live output data if available
+                if (lastOutput?.aa_message) {
+                  return lastOutput.aa_message;
+                }
+                for (const [key, value] of Object.entries(liveData)) {
+                  preview = preview.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
+                }
+                return preview;
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* Recent alerts log */}
         {recentAlerts.length > 0 && (
           <div className="space-y-0.5 max-h-[36px] overflow-hidden" style={{ borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: "4px" }}>

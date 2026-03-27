@@ -2,6 +2,7 @@
 import { useState, useCallback } from "react";
 import type { Strategy, StrategyNode, StrategyConnection } from "@/types";
 import type { Node, Edge } from "@xyflow/react";
+import { NODE_TYPES } from "@/lib/strategy/node-types";
 
 // Convert React Flow nodes/edges to our DB format
 function serializeNodes(nodes: Node[]): StrategyNode[] {
@@ -47,12 +48,8 @@ export function deserializeEdges(connections: StrategyConnection[]): Edge[] {
 }
 
 function getCategoryForType(type: string): "data" | "ai" | "logic" | "action" {
-  const dataTypes = ["market_watch", "news_feed", "price_alert"];
-  const aiTypes = ["ai_estimate", "sentiment", "edge_calc", "ai_custom"];
-  const logicTypes = ["gate", "cooldown", "split", "merge", "time_window"];
-  if (dataTypes.includes(type)) return "data";
-  if (aiTypes.includes(type)) return "ai";
-  if (logicTypes.includes(type)) return "logic";
+  const def = NODE_TYPES[type];
+  if (def) return def.category;
   return "action";
 }
 

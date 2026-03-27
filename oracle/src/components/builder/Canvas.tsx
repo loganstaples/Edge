@@ -66,22 +66,28 @@ function CanvasInner() {
   const searchParams = useSearchParams();
 
   const pollingInterval = turboMode ? 5000 : 30000;
-  const { logs, isExecuting, totalPnl, nodeStatuses } = useStrategyExecution(
+  const { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs } = useStrategyExecution(
     strategy?.id ?? null,
     strategyStatus,
     pollingInterval
   );
 
-  // Apply node statuses from execution ticks
+  // Apply node statuses and outputs from execution ticks
   useEffect(() => {
-    if (!nodeStatuses || Object.keys(nodeStatuses).length === 0) return;
+    const hasStatuses = nodeStatuses && Object.keys(nodeStatuses).length > 0;
+    const hasOutputs = nodeOutputs && Object.keys(nodeOutputs).length > 0;
+    if (!hasStatuses && !hasOutputs) return;
     setNodes((nds) =>
       nds.map((n) => ({
         ...n,
-        data: { ...n.data, status: nodeStatuses[n.id] || "idle" },
+        data: {
+          ...n.data,
+          ...(hasStatuses ? { status: nodeStatuses[n.id] || "idle" } : {}),
+          ...(hasOutputs && nodeOutputs[n.id] ? { lastOutput: nodeOutputs[n.id] } : {}),
+        },
       }))
     );
-  }, [nodeStatuses, setNodes]);
+  }, [nodeStatuses, nodeOutputs, setNodes]);
 
   // Load strategy from URL param on mount
   useEffect(() => {
@@ -333,7 +339,7 @@ function CanvasInner() {
   }, [pause]);
 
   const handleStrategyGenerated = useCallback(
-    (generatedNodes: any[], connections: any[]) => {
+    (generatedNodes: any[], connections: any[], name?: string) => {
       const newNodes: Node[] = generatedNodes.map((n: any) => ({
         id: n.id,
         type: n.type,
@@ -352,6 +358,7 @@ function CanvasInner() {
 
       setNodes(newNodes);
       setEdges(newEdges);
+      if (name) setStrategyName(name);
     },
     [setNodes, setEdges]
   );

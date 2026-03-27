@@ -1,6 +1,6 @@
 "use client";
 import { memo, useEffect, useState } from "react";
-import { NodeShell, useNodeConfig, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function StrategyLinkNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
@@ -27,6 +27,7 @@ function StrategyLinkNodeComponent({ id, type, data, selected }: any) {
             ))}
           </select>
         </div>
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.linked_strategy_name && (
           <div className="text-[9px] space-y-0.5">
             <div className="flex items-center gap-1.5">

@@ -3,25 +3,11 @@
 import { useState, useCallback, useEffect, useRef, KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import React from "react";
-import Dagre from "@dagrejs/dagre";
 
 interface AIPromptBarProps {
-  onStrategyGenerated: (nodes: any[], connections: any[]) => void;
+  onStrategyGenerated: (nodes: any[], connections: any[], name?: string) => void;
   isLoading: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement>;
-}
-
-function autoLayout(nodes: any[], connections: any[]) {
-  const g = new Dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 100 });
-  nodes.forEach((node: any) => g.setNode(node.id, { width: 200, height: 120 }));
-  connections.forEach((conn: any) => g.setEdge(conn.source_id, conn.target_id));
-  Dagre.layout(g);
-  return nodes.map((node: any) => {
-    const pos = g.node(node.id);
-    return { ...node, position: { x: pos.x - 100, y: pos.y - 60 } };
-  });
 }
 
 // idle     → no color border, just subtle static border
@@ -43,7 +29,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
   const [error, setError] = useState<string | null>(null);
   const [borderState, setBorderState] = useState<BorderState>("idle");
   const [flashKey, setFlashKey] = useState(0);
-  const [selectedModel, setSelectedModel] = useState<(typeof MODELS)[number]["id"]>(MODELS[0].id);
+  const [selectedModel, setSelectedModel] = useState<(typeof MODELS)[number]["id"]>(MODELS[1].id);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
@@ -196,8 +182,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
         throw new Error("Invalid response from AI");
       }
 
-      const layoutNodes = autoLayout(nodes, connections);
-      onStrategyGenerated(layoutNodes, connections);
+      onStrategyGenerated(nodes, connections, data.name);
       setPrompt("");
       // Reset textarea height back to default after clearing
       if (inputRef?.current) {

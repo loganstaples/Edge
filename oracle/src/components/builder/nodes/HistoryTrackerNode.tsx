@@ -13,7 +13,7 @@ function HistoryTrackerNodeComponent({ id, type, data, selected }: any) {
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Track Field</label>
-          <input className={inputClass} value={config.track_field ?? "ai_probability"} onChange={(e) => update("track_field", e.target.value)} placeholder="ai_probability" />
+          <input className={inputClass} value={config.track_field ?? "analyst_probability"} onChange={(e) => update("track_field", e.target.value)} placeholder="analyst_probability" />
         </div>
         <div className="flex gap-1.5">
           <div className="flex-1">

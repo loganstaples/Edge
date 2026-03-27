@@ -2,17 +2,30 @@
 import type { StrategyNode } from "@/types";
 import { getRecentArticles } from "@/lib/db/queries";
 import { fetchAllActiveGeminiEvents, getImpliedProbability } from "@/lib/data/gemini";
-import { fetchActivePolymarkets } from "@/lib/data/polymarket";
+import { fetchActivePolymarkets, fetchPolymarketOrderBook } from "@/lib/data/polymarket";
 import type { River } from "../executor";
 import { createHash } from "crypto";
 import type { GeminiEvent, PolymarketMarket } from "@/types";
+
+/** Map legacy/shorthand node types to canonical runner types */
+const DATA_TYPE_ALIASES: Record<string, string> = {
+  news_feed: "news_monitor",
+  market_watch: "news_monitor",
+  polymarket_markets: "polymarket_feed",
+  gemini_markets: "gemini_markets_feed",
+  market_filter: "gemini_markets_feed",
+  price_alert: "gemini_markets_feed",
+};
 
 /**
  * Data source runners return an ARRAY of river objects (fan-out).
  * Each item becomes an independent river flowing through the graph.
  */
 export async function runDataSource(node: StrategyNode, _river: River): Promise<River[]> {
-  switch (node.type) {
+  // Normalize legacy type names from older stored strategies
+  const type = DATA_TYPE_ALIASES[node.type] ?? node.type;
+
+  switch (type) {
     case "news_monitor":
       return await runNewsMonitor(node);
     case "polymarket_feed":
@@ -30,6 +43,7 @@ export async function runDataSource(node: StrategyNode, _river: River): Promise<
     case "strategy_link":
       return await runStrategyLink(node);
     default:
+      console.log(`[data-sources] Unknown data node type: ${node.type}`);
       return [];
   }
 }
@@ -104,23 +118,44 @@ async function runPolymarketFeed(node: StrategyNode): Promise<River[]> {
     return true;
   });
 
-  return markets.slice(0, maxResults).map((m) => {
+  const capped = markets.slice(0, maxResults);
+
+  // Fetch order book for the first market to get real bids/asks (limit API calls)
+  const orderBooks: Record<string, { bids: any[]; asks: any[]; last_trade_price: string }> = {};
+  const firstFew = capped.slice(0, 3);
+  for (const m of firstFew) {
+    const yesToken = m.tokens?.find((t) => t.outcome === "Yes");
+    if (yesToken?.token_id) {
+      try {
+        const ob = await fetchPolymarketOrderBook(yesToken.token_id);
+        orderBooks[yesToken.token_id] = {
+          bids: (ob.bids ?? []).slice(0, 5),
+          asks: (ob.asks ?? []).slice(0, 5),
+          last_trade_price: ob.last_trade_price ?? "",
+        };
+      } catch { /* skip on failure */ }
+    }
+  }
+
+  return capped.map((m) => {
     const yesToken = m.tokens?.find((t) => t.outcome === "Yes");
     const noToken = m.tokens?.find((t) => t.outcome === "No");
     const yesPrice = yesToken?.price ?? 0.5;
     const noPrice = noToken?.price ?? 0.5;
+    const tokenId = yesToken?.token_id || m.condition_id;
+    const ob = yesToken?.token_id ? orderBooks[yesToken.token_id] : undefined;
 
     return {
       event_title: m.question,
-      market_id: yesToken?.token_id || m.condition_id,
+      market_id: tokenId,
       yes_price: yesPrice,
       no_price: noPrice,
       spread: Math.abs(yesPrice - (1 - noPrice)),
-      volume_24h: 0,
-      liquidity: 0,
-      last_trade_at: "",
-      bids: [],
-      asks: [],
+      volume_24h: m.volume_num_24hr ?? 0,
+      liquidity: m.liquidity_clob ?? 0,
+      last_trade_at: m.last_trade_ts ?? ob?.last_trade_price ?? "",
+      bids: ob?.bids ?? [],
+      asks: ob?.asks ?? [],
     };
   });
 }
@@ -204,10 +239,13 @@ async function runTwitterMonitor(node: StrategyNode): Promise<River[]> {
     .filter(Boolean);
   const minFollowers = parseInt(node.config.min_followers ?? "1000", 10);
   const verifiedOnly = node.config.verified_only ?? false;
+  const excludeRetweets = node.config.exclude_retweets ?? true;
+  const language = node.config.language ?? "en";
 
   // Use news articles as a proxy for tweet-like content
   const articles = getRecentArticles(20);
 
+  // Seed random deterministically per article to avoid flickering on re-runs
   return articles
     .filter((a) => {
       if (keywords.length === 0 && watchHandles.length === 0) return true;
@@ -216,43 +254,102 @@ async function runTwitterMonitor(node: StrategyNode): Promise<River[]> {
       const matchesHandle = watchHandles.length === 0 || watchHandles.some((h: string) => (a.source || "").toLowerCase().includes(h));
       return matchesKeyword || matchesHandle;
     })
-    .slice(0, 10)
-    .map((a) => {
-      const followerCount = 50000 + Math.floor(Math.random() * 950000);
+    .slice(0, 15)
+    .map((a, _i) => {
+      // Deterministic pseudo-random based on article title hash
+      const hash = a.title.split("").reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
+      const followerCount = 50000 + Math.abs(hash % 950000);
       const isVerified = followerCount > 100000;
+      const isRetweet = (Math.abs(hash) % 5) === 0; // ~20% are "retweets"
+      const tweetLang = (Math.abs(hash) % 20) === 0 ? "es" : "en"; // ~5% non-English
+
+      // Apply exclude_retweets filter
+      if (excludeRetweets && isRetweet) return null;
+
+      // Apply language filter
+      if (language !== "all" && tweetLang !== language) return null;
+
       if (verifiedOnly && !isVerified) return null;
       if (followerCount < minFollowers) return null;
+
       return {
-        tweet_text: a.title,
+        tweet_text: isRetweet ? `RT: ${a.title}` : a.title,
         author_handle: (a.source || "unknown").replace(/\s+/g, "").toLowerCase(),
         author_followers: followerCount,
         author_verified: isVerified,
         timestamp: a.publishedAt,
-        retweet_count: Math.floor(Math.random() * 500),
-        like_count: Math.floor(Math.random() * 2000),
+        retweet_count: Math.abs(hash % 500),
+        like_count: Math.abs((hash * 7) % 2000),
       };
     })
-    .filter(Boolean) as River[];
+    .filter(Boolean)
+    .slice(0, 10) as River[];
 }
 
 // --- Crypto Price ---
 
+/** Map user-facing timeframe config to Gemini candle intervals and lookback */
+const TIMEFRAME_MAP: Record<string, { candle: string; lookbackMs: number }> = {
+  "1m": { candle: "1m", lookbackMs: 60_000 },
+  "5m": { candle: "5m", lookbackMs: 5 * 60_000 },
+  "15m": { candle: "15m", lookbackMs: 15 * 60_000 },
+  "1h": { candle: "1hr", lookbackMs: 60 * 60_000 },
+  "4h": { candle: "6hr", lookbackMs: 4 * 60 * 60_000 }, // closest Gemini interval
+  "24h": { candle: "1day", lookbackMs: 24 * 60 * 60_000 },
+};
+
 async function runCryptoPrice(node: StrategyNode): Promise<River[]> {
   const token = (node.config.token ?? "BTC").toUpperCase();
   const pair = `${token}USD`;
+  const timeframe = node.config.timeframe ?? "1h";
 
   try {
+    // Always fetch 24h ticker for current price, high, low, volume
     const res = await fetch(`https://api.gemini.com/v2/ticker/${pair.toLowerCase()}`);
     if (!res.ok) return [];
     const data = await res.json();
 
     const currentPrice = parseFloat(data.close || data.last || "0");
-    const open = parseFloat(data.open || "0");
     const high = parseFloat(data.high || "0");
     const low = parseFloat(data.low || "0");
     const volume = parseFloat(data.volume?.[token] || "0");
-    const changePct = open > 0 ? ((currentPrice - open) / open) * 100 : 0;
-    const changeAbs = currentPrice - open;
+
+    // For change calculation, use candles if timeframe != 24h
+    let changePct = 0;
+    let changeAbs = 0;
+    const open24h = parseFloat(data.open || "0");
+
+    if (timeframe === "24h" || !TIMEFRAME_MAP[timeframe]) {
+      changePct = open24h > 0 ? ((currentPrice - open24h) / open24h) * 100 : 0;
+      changeAbs = currentPrice - open24h;
+    } else {
+      // Fetch candles for the selected timeframe to compute accurate change
+      const tf = TIMEFRAME_MAP[timeframe];
+      try {
+        const candleRes = await fetch(
+          `https://api.gemini.com/v2/candles/${pair.toLowerCase()}/${tf.candle}`
+        );
+        if (candleRes.ok) {
+          // Gemini candles: [[time, open, high, low, close, volume], ...]
+          const candles = await candleRes.json();
+          if (Array.isArray(candles) && candles.length >= 2) {
+            // candles[0] is most recent; find the candle from ~timeframe ago
+            const refOpen = candles[1]?.[1] ?? candles[0]?.[1] ?? open24h;
+            changePct = refOpen > 0 ? ((currentPrice - refOpen) / refOpen) * 100 : 0;
+            changeAbs = currentPrice - refOpen;
+          } else {
+            changePct = open24h > 0 ? ((currentPrice - open24h) / open24h) * 100 : 0;
+            changeAbs = currentPrice - open24h;
+          }
+        } else {
+          changePct = open24h > 0 ? ((currentPrice - open24h) / open24h) * 100 : 0;
+          changeAbs = currentPrice - open24h;
+        }
+      } catch {
+        changePct = open24h > 0 ? ((currentPrice - open24h) / open24h) * 100 : 0;
+        changeAbs = currentPrice - open24h;
+      }
+    }
 
     return [{
       current_price: currentPrice,
@@ -434,22 +531,17 @@ async function runStrategyLink(node: StrategyNode): Promise<River[]> {
     const totalPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
     const openTrades = trades.filter((t) => t.status === "open");
 
-    // Derive signal from latest log
+    // Derive signal and edge from latest log
+    // Edge calculator outputs ec_edge; also check legacy key "edge"
     let signal = "neutral";
-    if (latestLog?.nodeLogs) {
-      const nodeValues = Object.values(latestLog.nodeLogs) as any[];
-      const edgeNode = nodeValues.find((n: any) => n.edge != null);
-      if (edgeNode) {
-        signal = edgeNode.edge > 0.02 ? "bullish" : edgeNode.edge < -0.02 ? "bearish" : "neutral";
-      }
-    }
-
-    // Derive edge from latest log
     let edge = 0;
     if (latestLog?.nodeLogs) {
       const nodeValues = Object.values(latestLog.nodeLogs) as any[];
-      const edgeNode = nodeValues.find((n: any) => n.edge != null);
-      if (edgeNode) edge = edgeNode.edge;
+      const edgeNode = nodeValues.find((n: any) => n.ec_edge != null || n.edge != null);
+      if (edgeNode) {
+        edge = edgeNode.ec_edge ?? edgeNode.edge ?? 0;
+        signal = edge > 0.02 ? "bullish" : edge < -0.02 ? "bearish" : "neutral";
+      }
     }
 
     return [{

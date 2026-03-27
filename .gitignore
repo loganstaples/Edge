@@ -22,3 +22,10 @@ yarn-error.log*
 
 # Vercel
 .vercel/
+
+# Reference projects (not part of the app)
+frontend_reference/
+
+# Superpowers/tooling artifacts
+docs/superpowers/
+oracle/docs/

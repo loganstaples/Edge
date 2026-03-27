@@ -1,18 +1,23 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, useFieldOverrides, OverridePill, inputClass, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function NewsMonitorNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
   const update = useNodeConfig(id);
   const lastOutput = data?.lastOutput;
+  const overrides = useFieldOverrides(id, type);
 
   return (
     <NodeShell id={id} type={type} selected={selected} status={data?.status}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Keywords</label>
-          <input className={inputClass} value={config.keywords ?? ""} onChange={(e) => update("keywords", e.target.value)} placeholder="Federal Reserve, Bitcoin ETF..." />
+          {overrides.keywords ? (
+            <OverridePill {...overrides.keywords} />
+          ) : (
+            <input className={inputClass} value={config.keywords ?? ""} onChange={(e) => update("keywords", e.target.value)} placeholder="Federal Reserve, Bitcoin ETF..." />
+          )}
         </div>
         <div>
           <label className={labelClass}>Source Tier</label>
@@ -31,6 +36,7 @@ function NewsMonitorNodeComponent({ id, type, data, selected }: any) {
             <option value="300">Every 5m</option>
           </select>
         </div>
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.headline && (
           <div className="text-[9px] text-edge-muted/60 space-y-0.5 max-h-[48px] overflow-hidden">
             <div className="truncate text-accent-blue">{lastOutput.headline}</div>

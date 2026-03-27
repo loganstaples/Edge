@@ -1,6 +1,6 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function CryptoPriceNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
@@ -36,6 +36,7 @@ function CryptoPriceNodeComponent({ id, type, data, selected }: any) {
             <option value="24h">24 hours</option>
           </select>
         </div>
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.current_price != null && (
           <div className="text-[9px] space-y-0.5">
             <div className="flex items-baseline gap-1.5">

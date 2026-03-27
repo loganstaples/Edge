@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "runner": "tsx -r tsconfig-paths/register src/lib/engine/runner-daemon.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

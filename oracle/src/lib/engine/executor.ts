@@ -32,18 +32,31 @@ export type River = Record<string, any>;
 
 export async function executeStrategy(strategy: Strategy): Promise<ExecutionResult> {
   const sorted = topologicalSort(strategy.nodes, strategy.connections);
-  const sourceNodes = sorted.filter((n) => n.category === "data");
-  const downstreamNodes = sorted.filter((n) => n.category !== "data");
+
+  // Key distinction: data sources with NO incoming connections are standalone entry
+  // points (Phase 1). Data sources WITH incoming connections are reactive — they run
+  // in Phase 2 like any other node, using upstream data to drive their fetch.
+  const incomingCount = new Map<string, number>();
+  for (const node of sorted) incomingCount.set(node.id, 0);
+  for (const conn of strategy.connections) {
+    incomingCount.set(conn.target_id, (incomingCount.get(conn.target_id) ?? 0) + 1);
+  }
+
+  const standaloneDataNodes = sorted.filter(
+    (n) => n.category === "data" && (incomingCount.get(n.id) ?? 0) === 0
+  );
+  const downstreamNodes = sorted.filter(
+    (n) => n.category !== "data" || (incomingCount.get(n.id) ?? 0) > 0
+  );
 
   const result: ExecutionResult = { nodeOutputs: [], tradesPlaced: [], logs: [] };
 
-  // Phase 1: Run all data source nodes, collect emitted items
+  // Phase 1: Run standalone data sources — these create pipeline-triggering rivers
   const allRivers: { sourceNodeId: string; river: River }[] = [];
 
-  for (const sourceNode of sourceNodes) {
+  for (const sourceNode of standaloneDataNodes) {
     try {
       const items = await runDataSource(sourceNode, {} as River);
-      // items is an array of river objects (fan-out)
       const maxItems = sourceNode.config.max_items ?? items.length;
       const capped = items.slice(0, maxItems);
 
@@ -51,9 +64,10 @@ export async function executeStrategy(strategy: Strategy): Promise<ExecutionResu
         allRivers.push({ sourceNodeId: sourceNode.id, river: { ...item } });
       }
 
+      const latestItem = capped.length > 0 ? capped[capped.length - 1] : {};
       result.nodeOutputs.push({
         nodeId: sourceNode.id,
-        outputs: { _item_count: capped.length },
+        outputs: { _item_count: capped.length, ...latestItem },
         status: capped.length > 0 ? "passed" : "warning",
       });
     } catch (error) {
@@ -66,16 +80,29 @@ export async function executeStrategy(strategy: Strategy): Promise<ExecutionResu
     }
   }
 
-  // Phase 2: For each river, run downstream nodes in topological order
-  for (const { river: initialRiver } of allRivers) {
+  // Build cross-source merge map from standalone sources
+  const latestBySource: Record<string, River> = {};
+  for (const { sourceNodeId, river: r } of allRivers) {
+    latestBySource[sourceNodeId] = r;
+  }
+
+  // Phase 2: For each river, run downstream nodes in topological order.
+  // This includes reactive data sources (data nodes with inputs).
+  for (const { sourceNodeId, river: initialRiver } of allRivers) {
     const outputMap: Record<string, Record<string, any>> = {};
-    // Seed the output map with the initial river under a virtual source key
     outputMap["__source__"] = initialRiver;
 
+    for (const [srcId, srcRiver] of Object.entries(latestBySource)) {
+      if (srcId !== sourceNodeId) {
+        outputMap[srcId] = srcRiver;
+      }
+    }
+
     for (const node of downstreamNodes) {
+      if (outputMap[node.id]?._blocked) continue;
+
       const river = buildRiver(node.id, strategy.connections, outputMap, initialRiver);
 
-      // Check if this node is reachable (not on a blocked Split branch)
       if (!isNodeReachable(node.id, strategy.connections, outputMap)) {
         result.nodeOutputs.push({ nodeId: node.id, outputs: {}, status: "blocked" });
         continue;
@@ -84,22 +111,25 @@ export async function executeStrategy(strategy: Strategy): Promise<ExecutionResu
       try {
         const outputs = await runNode(node, river);
 
+        // Accumulate: store the node's outputs PLUS everything in its input river.
+        // This ensures data flows through the entire chain — e.g., search_terms from
+        // an AI Analyst survive through intermediate nodes to reach a reactive feed.
+        const accumulated = { ...river, ...outputs };
+
         // Gate-like nodes: check _gate_result to block downstream
         const isGateNode = outputs._gate_result !== undefined;
         if (isGateNode && outputs._gate_result === false) {
-          outputMap[node.id] = outputs;
+          outputMap[node.id] = accumulated;
           result.nodeOutputs.push({ nodeId: node.id, outputs, status: "blocked" });
           markDownstreamBlocked(node.id, strategy.connections, downstreamNodes, outputMap, result);
-          break; // Stop this river
+          continue;
         }
 
-        // Router nodes: set active handle for downstream routing
         if (outputs._active_handle) {
-          outputMap[node.id] = outputs;
+          outputMap[node.id] = accumulated;
           result.nodeOutputs.push({ nodeId: node.id, outputs, status: "passed" });
         } else {
-          outputMap[node.id] = outputs;
-          // Collect trades from action nodes
+          outputMap[node.id] = accumulated;
           if (node.category === "action" && (outputs.trade_confirmation || outputs.ta_trade_confirmation)) {
             result.tradesPlaced.push(outputs.trade_confirmation || outputs.ta_trade_confirmation);
           }
@@ -252,11 +282,51 @@ function topologicalSort(nodes: StrategyNode[], connections: StrategyConnection[
 }
 
 async function runNode(node: StrategyNode, river: River): Promise<Record<string, any>> {
-  // Data source nodes are handled in Phase 1 — they should never appear here
   switch (node.category) {
+    case "data": return await runReactiveDataSource(node, river);
     case "ai": return await runAINode(node, river);
     case "logic": return await runLogicNode(node, river);
     case "action": return await runActionNode(node, river);
     default: return {};
   }
+}
+
+/**
+ * Run a data source reactively — upstream river data overrides static config.
+ * This allows patterns like: AI Analyst → (search_terms) → Polymarket Feed
+ */
+async function runReactiveDataSource(node: StrategyNode, river: River): Promise<Record<string, any>> {
+  // Override static config with upstream river values
+  const dynamicNode = { ...node, config: { ...node.config } };
+
+  // Generic: any river field matching a config key overrides it
+  for (const [key, value] of Object.entries(river)) {
+    if (key.startsWith("_") || value == null) continue;
+    if (key in dynamicNode.config && typeof value === typeof dynamicNode.config[key]) {
+      dynamicNode.config[key] = value;
+    }
+  }
+
+  // Common aliases: upstream nodes can set search_terms/query to drive searches
+  const searchTerms = river.search_terms ?? river.search_query ?? river.query ?? null;
+  if (typeof searchTerms === "string" && searchTerms.trim()) {
+    if (node.type === "polymarket_feed") dynamicNode.config.market_search = searchTerms;
+    else if (node.type === "gemini_markets_feed") dynamicNode.config.event_search = searchTerms;
+    else if (node.type === "news_monitor") dynamicNode.config.keywords = searchTerms;
+    else if (node.type === "twitter_monitor") dynamicNode.config.keywords = searchTerms;
+  }
+
+  const items = await runDataSource(dynamicNode, river);
+  const maxItems = dynamicNode.config.max_results ?? dynamicNode.config.max_items ?? items.length;
+  const capped = items.slice(0, maxItems);
+
+  if (capped.length === 0) return { _item_count: 0 };
+
+  // Return all results — top item fields directly + full list as available_markets
+  return {
+    ...capped[0],
+    available_markets: capped,
+    available_market_count: capped.length,
+    _item_count: capped.length,
+  };
 }

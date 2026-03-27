@@ -74,6 +74,54 @@ export async function fetchRSSArticles(): Promise<RawArticle[]> {
   return articles;
 }
 
+/**
+ * Fetch historical articles from NewsAPI /everything endpoint.
+ * Supports date range and keyword filtering for backtesting.
+ * Free tier: up to 1 month back, 100 results per page.
+ */
+export async function fetchHistoricalNews(opts: {
+  keywords?: string;
+  from: string;   // ISO date, e.g. "2026-03-20"
+  to: string;     // ISO date
+  pageSize?: number;
+}): Promise<RawArticle[]> {
+  if (!NEWS_API_KEY) return [];
+
+  const params = new URLSearchParams({
+    apiKey: NEWS_API_KEY,
+    language: "en",
+    sortBy: "publishedAt",
+    pageSize: String(opts.pageSize ?? 30),
+    from: opts.from,
+    to: opts.to,
+  });
+
+  // Use keyword search if provided, otherwise broad business/politics query
+  if (opts.keywords && opts.keywords.trim()) {
+    params.set("q", opts.keywords.trim());
+  } else {
+    params.set("q", "economy OR politics OR markets OR election OR crisis");
+  }
+
+  try {
+    const res = await fetch(`${NEWS_API_BASE}/everything?${params}`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return (json.articles ?? [])
+      .filter((a: any) => a.title && a.title !== "[Removed]")
+      .map((a: any) => ({
+        title: a.title ?? "",
+        description: a.description ?? null,
+        source: a.source?.name ?? "Unknown",
+        url: a.url ?? null,
+        publishedAt: a.publishedAt ?? opts.from,
+        category: null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export async function ingestAllNews(existingTitles: string[]): Promise<RawArticle[]> {
   const categories = ["business", "technology", "science", "politics"];
   const allArticles: RawArticle[] = [];

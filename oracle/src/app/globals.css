@@ -3,96 +3,101 @@
 @tailwind utilities;
 
 :root {
-  --edge-bg: #08090e;
-  --edge-surface: #0e1018;
-  --edge-border: #1a1d2e;
+  --foreground: #fafafa;
+  --background: #09090b;
 }
 
 body {
-  background-color: var(--edge-bg);
-  color: #eaeaf0;
+  color: var(--foreground);
+  background: var(--background);
   font-family: "Inter", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Glass morphism utilities */
 @layer utilities {
+  /* ─── HELIX-style glass utilities ─── */
   .glass {
-    background: rgba(14, 16, 24, 0.6);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    @apply bg-white/[0.02] backdrop-blur-md border border-white/[0.05];
   }
 
   .glass-hover {
-    background: rgba(20, 22, 32, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    @apply hover:bg-white/[0.04] hover:border-white/[0.08] transition-colors duration-200;
   }
 
-  .glass-card {
-    background: linear-gradient(
-      135deg,
-      rgba(14, 16, 24, 0.8) 0%,
-      rgba(20, 22, 32, 0.6) 100%
-    );
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+  .card-gradient {
+    @apply bg-gradient-to-b from-white/[0.04] to-transparent;
   }
 
-  .gradient-edge {
-    position: relative;
+  .gradient-top-edge {
+    @apply absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent;
   }
 
-  .gradient-edge::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(129, 140, 248, 0.3),
-      transparent
-    );
+  /* ─── Typography utilities ─── */
+  .page-title {
+    @apply text-xl font-semibold tracking-tight text-white;
+  }
+
+  .section-header {
+    @apply text-sm font-medium text-white;
+  }
+
+  .label-text {
+    @apply text-2xs text-edge-muted uppercase tracking-wider;
+  }
+
+  .data-text {
+    @apply font-mono text-2xl font-semibold text-white tracking-tight;
+  }
+
+  .stat-label {
+    @apply text-2xs text-edge-muted uppercase tracking-wider;
+  }
+
+  .stat-value {
+    @apply font-mono text-lg font-light text-white;
   }
 }
 
-/* Smooth scrollbars */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+/* ─── Glass panel (backwards compat for builder/nodes) ─── */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-*::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-*::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
-*::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
 }
 
-*::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
-/* Selection color */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+/* ─── Selection ─── */
 ::selection {
-  background: rgba(129, 140, 248, 0.3);
-  color: #eaeaf0;
+  background: rgba(250, 250, 250, 0.15);
+  color: #fafafa;
 }
 
-/* Smooth transitions for all interactive elements */
+/* ─── Smooth transitions ─── */
 button,
 a,
 input,
@@ -105,17 +110,17 @@ select:focus {
   outline: none;
 }
 
-/* Font variant for tabular numbers */
+/* ─── Tabular nums ─── */
 .font-mono {
   font-variant-numeric: tabular-nums;
 }
 
-/* Override ReactFlow grab cursor when empty canvas overlay is visible */
+/* ─── ReactFlow override ─── */
 .react-flow-default-cursor .react-flow__pane {
   cursor: default !important;
 }
 
-/* AI prompt bar placeholder states */
+/* ─── AI prompt bar ─── */
 .ai-placeholder-dim::placeholder {
   color: rgba(90, 95, 122, 0.7);
   transition: color 0.2s ease;
@@ -125,3 +130,10 @@ select:focus {
   transition: color 0.2s ease;
 }
 
+/* ─── Sparkline glow ─── */
+.sparkline-svg {
+  filter: drop-shadow(0px 0px 4px rgba(52, 211, 153, 0.5));
+}
+.sparkline-svg-red {
+  filter: drop-shadow(0px 0px 4px rgba(248, 113, 113, 0.5));
+}

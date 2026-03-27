@@ -32,7 +32,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "📡",
     color: DATA_COLOR,
     defaultConfig: { keywords: "", source_tier: "all_major", refresh: "60" },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["headline", "source_name", "source_tier", "published_at", "url"],
   },
   polymarket_feed: {
@@ -43,7 +43,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "🟣",
     color: DATA_COLOR,
     defaultConfig: { market_search: "", watch_mode: "single", category: "all", max_results: 10 },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["event_title", "market_id", "yes_price", "no_price", "spread", "volume_24h", "liquidity", "last_trade_at", "bids", "asks"],
   },
   gemini_markets_feed: {
@@ -54,7 +54,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "♊",
     color: DATA_COLOR,
     defaultConfig: { event_search: "", watch_mode: "single", category: "all", max_results: 10, alert_threshold: 5 },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["event_title", "market_id", "instrument_symbol", "contract_price", "bid_price", "ask_price", "last_trade_price", "spread", "liquidity", "event_status", "expiry_date", "category", "significant_move"],
   },
   twitter_monitor: {
@@ -65,7 +65,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "𝕏",
     color: DATA_COLOR,
     defaultConfig: { keywords: "", handles: "", min_followers: "1000", verified_only: false, exclude_retweets: true, language: "en" },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["tweet_text", "author_handle", "author_followers", "author_verified", "timestamp", "retweet_count", "like_count"],
   },
   crypto_price: {
@@ -76,7 +76,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "₿",
     color: DATA_COLOR,
     defaultConfig: { token: "BTC", timeframe: "1h" },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["current_price", "change_pct", "change_abs", "volume_24h", "high_24h", "low_24h", "token"],
   },
   onchain_activity: {
@@ -87,7 +87,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "⛓️",
     color: DATA_COLOR,
     defaultConfig: { mode: "whale_alerts", wallet_address: "", min_value: "1000000", chain: "all" },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["tx_hash", "from_address", "to_address", "token", "dollar_value", "chain", "block_timestamp"],
   },
   calendar_timer: {
@@ -98,7 +98,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "⏰",
     color: DATA_COLOR,
     defaultConfig: { mode: "interval", interval: "300", scheduled_time: "09:00", days: ["Mon", "Tue", "Wed", "Thu", "Fri"], fire_at: "" },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["fired_at", "fire_reason", "next_fire_at"],
   },
   strategy_link: {
@@ -109,7 +109,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     icon: "🔗",
     color: DATA_COLOR,
     defaultConfig: { strategy_id: "" },
-    handles: { inputs: [], outputs: ["output"] },
+    handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["linked_strategy_name", "linked_signal", "linked_edge", "linked_pnl", "linked_status", "linked_last_trade", "linked_position"],
   },
 
@@ -154,7 +154,7 @@ export const NODE_TYPES: Record<string, NodeTypeDefinition> = {
     description: "Track value trends, momentum, and streaks over time",
     icon: "📈",
     color: AI_COLOR,
-    defaultConfig: { track_field: "ai_probability", depth: 25, time_window: "1h" },
+    defaultConfig: { track_field: "analyst_probability", depth: 25, time_window: "1h" },
     handles: { inputs: ["input"], outputs: ["output"] },
     outputKeys: ["history_current", "history_values", "history_trend", "history_avg", "history_min", "history_max", "history_streak", "history_rate_of_change"],
   },
