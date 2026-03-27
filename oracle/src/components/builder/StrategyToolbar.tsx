@@ -10,11 +10,13 @@ interface StrategyToolbarProps {
   status: StrategyStatus;
   isSaving?: boolean;
   turboMode: boolean;
+  slowMode: boolean;
   onNameChange: (name: string) => void;
   onSave: () => void;
   onDeploy: () => void;
   onPause: () => void;
   onToggleTurbo: () => void;
+  onToggleSlow: () => void;
 }
 
 const statusConfig: Record<StrategyStatus, { label: string; color: string; bg: string; glow: string }> = {
@@ -44,7 +46,7 @@ const statusConfig: Record<StrategyStatus, { label: string; color: string; bg: s
   },
 };
 
-export function StrategyToolbar({ name, status, isSaving, turboMode, onNameChange, onSave, onDeploy, onPause, onToggleTurbo }: StrategyToolbarProps) {
+export function StrategyToolbar({ name, status, isSaving, turboMode, slowMode, onNameChange, onSave, onDeploy, onPause, onToggleTurbo, onToggleSlow }: StrategyToolbarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -165,16 +167,33 @@ export function StrategyToolbar({ name, status, isSaving, turboMode, onNameChang
         {/* Right: Actions */}
         <div className="flex items-center gap-2">
           {status === "running" && (
-            <button
-              onClick={onToggleTurbo}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all duration-200 ${
-                turboMode
-                  ? "border-accent-cyan/30 text-accent-cyan bg-accent-cyan/10"
-                  : "border-edge-border text-edge-muted hover:text-edge-text-2"
-              }`}
-            >
-              {turboMode ? "⚡ Turbo" : "⚡"}
-            </button>
+            <div className="flex items-center rounded-lg border border-edge-border overflow-hidden">
+              <button
+                onClick={onToggleSlow}
+                className={`px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${
+                  slowMode
+                    ? "text-accent-purple bg-accent-purple/12 border-r border-accent-purple/20"
+                    : "text-edge-muted hover:text-edge-text-2 border-r border-edge-border"
+                }`}
+                title="Slow mode — step through nodes visually"
+              >
+                {slowMode ? "Slow" : "Slow"}
+              </button>
+              <button
+                onClick={onToggleTurbo}
+                className={`px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${
+                  turboMode
+                    ? "text-accent-cyan bg-accent-cyan/12"
+                    : slowMode
+                      ? "text-edge-dim"
+                      : "text-edge-muted hover:text-edge-text-2"
+                }`}
+                disabled={slowMode}
+                title="Turbo mode — faster tick polling"
+              >
+                Turbo
+              </button>
+            </div>
           )}
           {status === "running" && (
             <button

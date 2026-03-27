@@ -8,7 +8,8 @@ const STARTING_BALANCE = 10000;
 export function useStrategyExecution(
   strategyId: string | null,
   status: string,
-  pollingInterval: number = 30000
+  pollingInterval: number = 30000,
+  slowMode: boolean = false
 ) {
   const [logs, setLogs] = useState<ExecutionLogEntry[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -47,24 +48,28 @@ export function useStrategyExecution(
           setNodeStatuses(statuses);
 
           // Mark nodes as active temporarily (staggered to simulate sequential execution)
+          // Slow mode: longer delays so each node visibly lights up one at a time
+          const staggerDelay = slowMode ? 1200 : 300;
+          const glowDuration = slowMode ? 1800 : 800;
           const nodeIds = Object.keys(statuses);
           nodeIds.forEach((nodeId, index) => {
-            const delay = index * 300; // stagger 300ms per node
+            const delay = index * staggerDelay;
 
-            setTimeout(() => {
+            const startTimer = setTimeout(() => {
               setActiveNodeIds((prev) => new Set(prev).add(nodeId));
 
-              // Clear active after 800ms
               const clearTimer = setTimeout(() => {
                 setActiveNodeIds((prev) => {
                   const next = new Set(prev);
                   next.delete(nodeId);
                   return next;
                 });
-              }, 800);
+              }, glowDuration);
 
-              activeTimersRef.current.set(nodeId, clearTimer);
+              activeTimersRef.current.set(`${nodeId}_clear`, clearTimer);
             }, delay);
+
+            activeTimersRef.current.set(`${nodeId}_start`, startTimer);
           });
 
           // Extract per-node outputs for lastOutput
@@ -140,7 +145,7 @@ export function useStrategyExecution(
     } finally {
       setIsExecuting(false);
     }
-  }, [strategyId]);
+  }, [strategyId, slowMode]);
 
   useEffect(() => {
     if (status === "running" && strategyId) {

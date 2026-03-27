@@ -52,6 +52,7 @@ function CanvasInner() {
   const [aiLoading] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
   const [turboMode, setTurboMode] = useState(false);
+  const [slowMode, setSlowMode] = useState(false);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const aiPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -66,11 +67,17 @@ function CanvasInner() {
   const { strategy, isSaving, save, load, deploy, pause } = useStrategy();
   const searchParams = useSearchParams();
 
-  const pollingInterval = turboMode ? 5000 : 30000;
+  // In slow mode, space ticks far enough apart so all node glows finish before the next tick
+  // Each node gets 1200ms stagger + 1800ms glow, so total animation ≈ nodes*1200 + 1800
+  const nodeCount = nodes.length || 1;
+  const pollingInterval = slowMode
+    ? Math.max(nodeCount * 1200 + 2500, 8000)
+    : turboMode ? 5000 : 30000;
   const { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs, activeNodeIds, equityHistory, liveStats } = useStrategyExecution(
     strategy?.id ?? null,
     strategyStatus,
-    pollingInterval
+    pollingInterval,
+    slowMode
   );
 
   // Apply node statuses, outputs, and active state from execution ticks
@@ -382,11 +389,13 @@ function CanvasInner() {
         status={strategyStatus}
         isSaving={isSaving}
         turboMode={turboMode}
+        slowMode={slowMode}
         onNameChange={setStrategyName}
         onSave={handleSave}
         onDeploy={handleDeploy}
         onPause={handlePause}
-        onToggleTurbo={() => setTurboMode((t) => !t)}
+        onToggleTurbo={() => { setTurboMode((t) => !t); if (!turboMode) setSlowMode(false); }}
+        onToggleSlow={() => { setSlowMode((s) => !s); if (!slowMode) setTurboMode(false); }}
       />
       {/* Live stats bar — visible when strategy is running */}
       {(strategyStatus === "running" || strategyStatus === "paused") && liveStats.tickCount > 0 && (
