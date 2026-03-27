@@ -17,11 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased min-h-screen bg-edge-bg text-edge-text">
-        <div className="fixed inset-0 bg-twilight-gradient pointer-events-none" />
-        <div className="fixed inset-0 bg-twilight-subtle pointer-events-none" />
-        <div className="relative z-10">
-          {children}
-        </div>
+        {children}
       </body>
     </html>
   );

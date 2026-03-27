@@ -28,9 +28,9 @@ function AIAnalystNodeComponent({ id, type, data, selected }: any) {
           <div className="flex-1">
             <label className={labelClass}>Model</label>
             <select className={selectClass} value={config.model ?? "claude-haiku"} onChange={(e) => update("model", e.target.value)}>
-              <option value="claude-haiku">Haiku (fast)</option>
-              <option value="claude">Claude Sonnet</option>
-              <option value="gpt4">GPT-4</option>
+              <option value="claude-haiku">Haiku 4.5</option>
+              <option value="claude-sonnet">Sonnet 4.6</option>
+              <option value="claude-opus">Opus 4.6</option>
             </select>
           </div>
           <div className="flex-1">

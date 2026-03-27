@@ -2,8 +2,19 @@
 import type { StrategyNode } from "@/types";
 import type { River } from "../executor";
 
+/** Map legacy/shorthand node types to canonical runner types */
+const LOGIC_TYPE_ALIASES: Record<string, string> = {
+  gate: "multi_condition_gate",
+  threshold_gate: "multi_condition_gate",
+  and_or: "multi_condition_gate",
+  cooldown: "cooldown_gate",
+  cooldown_timer: "cooldown_gate",
+};
+
 export async function runLogicNode(node: StrategyNode, river: River): Promise<Record<string, any>> {
-  switch (node.type) {
+  const type = LOGIC_TYPE_ALIASES[node.type] ?? node.type;
+
+  switch (type) {
     case "edge_calculator":
       return runEdgeCalculator(node, river);
     case "arb_detector":
@@ -17,6 +28,7 @@ export async function runLogicNode(node: StrategyNode, river: River): Promise<Re
     case "multi_condition_gate":
       return runMultiConditionGate(node, river);
     default:
+      console.log(`[logic-nodes] Unknown logic node type: ${node.type}`);
       return {};
   }
 }
@@ -60,7 +72,7 @@ function evaluateCondition(condition: Condition, river: River): boolean {
 
 function runEdgeCalculator(node: StrategyNode, river: River): Record<string, any> {
   const probability = river.analyst_probability ?? river.consensus_probability ?? null;
-  const marketPrice = river.price ?? river.contract_price ?? river.yes_price ?? null;
+  const marketPrice = river.price ?? river.contract_price ?? river.yes_price ?? river.current_price ?? null;
 
   if (probability == null || marketPrice == null) {
     return {
@@ -158,18 +170,27 @@ function runArbDetector(node: StrategyNode, river: River): Record<string, any> {
   const minSpread = node.config.min_spread ?? 3;
   const netOfFees = node.config.net_of_fees ?? true;
 
-  let price1 = river.polymarket_price ?? river.yes_price ?? null;
+  // Resolve prices from the two most common data sources.
+  // After the cross-source merge fix, the river may contain keys from both
+  // a Polymarket feed (yes_price) and a Gemini feed (contract_price).
+  let price1 = river.yes_price ?? null;
   let platform1 = "polymarket";
-  let price2 = river.gemini_price ?? river.contract_price ?? null;
+  let price2 = river.contract_price ?? null;
   let platform2 = "gemini";
 
-  if (price1 == null && river.price != null) {
-    price1 = river.price;
-    platform1 = river.platform ?? "platform_1";
+  // Fallback: try current_price (crypto) or generic price field
+  if (price1 == null && river.current_price != null) {
+    price1 = river.current_price;
+    platform1 = river.platform ?? "exchange";
   }
   if (price2 == null && price1 != null && river.price != null && river.price !== price1) {
     price2 = river.price;
     platform2 = river.platform ?? "platform_2";
+  }
+  // If we only found one price, swap so price1 is always populated
+  if (price1 == null && price2 != null) {
+    price1 = price2; platform1 = platform2;
+    price2 = null; platform2 = "";
   }
 
   if (price1 == null || price2 == null) {
@@ -233,16 +254,10 @@ interface Route {
 function runRouter(node: StrategyNode, river: River): Record<string, any> {
   const routes: Route[] = node.config.routes ?? [];
 
+  // Evaluate conditional routes first (skip defaults)
   for (let i = 0; i < routes.length; i++) {
     const route = routes[i];
-    if (route.is_default) {
-      return {
-        _router_active_route: i, _router_label: route.label,
-        _active_handle: `route_${i + 1}`, _gate_result: true,
-        _gate_details: `Default route: ${route.label}`,
-      };
-    }
-
+    if (route.is_default) continue;
     if (!route.field) continue;
 
     const condition: Condition = { field: route.field, operator: route.comparator, value: route.value };
@@ -251,6 +266,17 @@ function runRouter(node: StrategyNode, river: River): Record<string, any> {
         _router_active_route: i, _router_label: route.label,
         _active_handle: `route_${i + 1}`, _gate_result: true,
         _gate_details: `Matched route: ${route.label}`,
+      };
+    }
+  }
+
+  // Fall back to the default route if no conditional route matched
+  for (let i = 0; i < routes.length; i++) {
+    if (routes[i].is_default) {
+      return {
+        _router_active_route: i, _router_label: routes[i].label,
+        _active_handle: `route_${i + 1}`, _gate_result: true,
+        _gate_details: `Default route: ${routes[i].label}`,
       };
     }
   }
@@ -272,7 +298,8 @@ function runPriceAlertDecide(node: StrategyNode, river: River): Record<string, a
 
   const comparator = node.config.comparator ?? "rises_above";
   const target = node.config.target ?? 0.5;
-  const holdFor = parseInt(node.config.hold_for ?? "0", 10) * 1000;
+  const holdForRaw = node.config.hold_for ?? "0";
+  const holdFor = (holdForRaw === "instant" || holdForRaw === "0") ? 0 : parseInt(holdForRaw, 10) * 1000;
   const now = Date.now();
 
   const state = priceAlertState[node.id] ?? { crossedAt: 0, lastPrice: currentPrice };
@@ -311,6 +338,11 @@ function runPriceAlertDecide(node: StrategyNode, river: River): Record<string, a
     }
   }
 
+  // Reset crossedAt after triggering to prevent re-firing every tick
+  if (triggered) {
+    priceAlertState[node.id].crossedAt = 0;
+  }
+
   return {
     pa_triggered: triggered, pa_current_price: currentPrice,
     pa_direction: direction || null,
@@ -327,7 +359,17 @@ function runPriceAlertDecide(node: StrategyNode, river: River): Record<string, a
 const cooldownGateState: Record<string, { fires: number[]; lastDirection: string | null }> = {};
 
 function runCooldownGate(node: StrategyNode, river: River): Record<string, any> {
-  const periodSec = parseInt(node.config.period ?? "300", 10);
+  // Support legacy config format: { duration: 5, unit: "minutes" }
+  let periodSec: number;
+  if (node.config.period != null) {
+    periodSec = parseInt(node.config.period, 10);
+  } else if (node.config.duration != null) {
+    const dur = parseInt(node.config.duration, 10);
+    const unit = (node.config.unit ?? "seconds").toLowerCase();
+    periodSec = unit.startsWith("min") ? dur * 60 : unit.startsWith("hour") ? dur * 3600 : dur;
+  } else {
+    periodSec = 300;
+  }
   const periodMs = periodSec * 1000;
   const maxTriggers = node.config.max_triggers ?? 3;
   const resetOnReversal = node.config.reset_on_reversal ?? false;
@@ -336,6 +378,7 @@ function runCooldownGate(node: StrategyNode, river: River): Record<string, any> 
   if (!cooldownGateState[node.id]) cooldownGateState[node.id] = { fires: [], lastDirection: null };
   const state = cooldownGateState[node.id];
 
+  // Prune fires outside the rolling window
   state.fires = state.fires.filter((t) => now - t < periodMs);
 
   const currentDirection = river.ec_direction ?? river.analyst_direction ?? river.direction ?? null;
@@ -346,8 +389,10 @@ function runCooldownGate(node: StrategyNode, river: River): Record<string, any> 
 
   const triggersRemaining = maxTriggers - state.fires.length;
   const lastFire = state.fires.length > 0 ? state.fires[state.fires.length - 1] : 0;
-  const timeSinceLastFire = lastFire > 0 ? now - lastFire : periodMs;
-  const cooldownPct = lastFire > 0 ? Math.min(1, timeSinceLastFire / periodMs) : 1;
+  const _timeSinceLastFire = lastFire > 0 ? now - lastFire : periodMs;
+  // Cooldown progress: how far through the window we are since the oldest fire
+  const oldestFire = state.fires.length > 0 ? state.fires[0] : 0;
+  const cooldownPct = oldestFire > 0 ? Math.min(1, (now - oldestFire) / periodMs) : 1;
 
   if (triggersRemaining <= 0) {
     const nextAvailable = state.fires[0] + periodMs;
@@ -358,18 +403,11 @@ function runCooldownGate(node: StrategyNode, river: River): Record<string, any> 
     };
   }
 
-  if (lastFire > 0 && timeSinceLastFire < periodMs && state.fires.length > 0) {
-    const remaining = Math.ceil((periodMs - timeSinceLastFire) / 1000);
-    return {
-      cg_status: "cooling", cg_cooldown_pct: cooldownPct, cg_remaining: remaining, cg_triggers_remaining: triggersRemaining,
-      _gate_result: false, _gate_details: `Cooling down — ${remaining}s remaining`,
-    };
-  }
-
+  // Gate passes — record this fire
   state.fires.push(now);
   return {
     cg_status: "passing", cg_cooldown_pct: 1, cg_remaining: 0, cg_triggers_remaining: triggersRemaining - 1,
-    _gate_result: true, _gate_details: `Passed — ${triggersRemaining - 1} triggers remaining`,
+    _gate_result: true, _gate_details: `Passed — ${triggersRemaining - 1} triggers remaining in window`,
   };
 }
 
@@ -380,7 +418,20 @@ function runCooldownGate(node: StrategyNode, river: River): Record<string, any> 
 const multiGateState: Record<string, Record<number, number>> = {};
 
 function runMultiConditionGate(node: StrategyNode, river: River): Record<string, any> {
-  const gateMode = node.config.gate_mode ?? "all";
+  // Legacy "gate" and "threshold_gate" nodes may use a conditions array
+  // or a simple threshold/operator format. Handle both.
+  const conditions: Condition[] | undefined = node.config.conditions;
+  if (conditions && conditions.length > 0) {
+    return runConditionsGate(node, river, conditions);
+  }
+
+  // Legacy "threshold_gate" with { threshold, operator }
+  if (node.config.threshold != null) {
+    return runThresholdGate(node, river);
+  }
+
+  // Legacy "and_or" with { mode: "AND"|"OR" }
+  const gateMode = node.config.gate_mode ?? (node.config.mode === "OR" ? "any" : "all");
   const inputCount = node.config.input_count ?? 2;
   const timeoutStr = node.config.timeout ?? "none";
   const timeoutMs = timeoutStr === "none" ? Infinity : parseInt(timeoutStr, 10) * 1000;
@@ -443,5 +494,50 @@ function runMultiConditionGate(node: StrategyNode, river: River): Record<string,
     _gate_details: satisfied
       ? `Gate satisfied: ${activeCount}/${inputCount} inputs active (${gateMode})`
       : `Waiting: ${activeCount}/${inputCount} inputs active (${gateMode})`,
+  };
+}
+
+/**
+ * Legacy "gate" node: evaluate an array of { field, operator, value } conditions.
+ * All conditions must pass (AND logic).
+ */
+function runConditionsGate(node: StrategyNode, river: River, conditions: Condition[]): Record<string, any> {
+  const results = conditions.map((c) => evaluateCondition(c, river));
+  const allPassed = results.every(Boolean);
+  const passedCount = results.filter(Boolean).length;
+
+  return {
+    mcg_satisfied: allPassed, mcg_input_states: results, mcg_mode: "conditions",
+    _gate_result: allPassed,
+    _gate_details: allPassed
+      ? `All ${conditions.length} conditions passed`
+      : `${passedCount}/${conditions.length} conditions passed`,
+  };
+}
+
+/**
+ * Legacy "threshold_gate" node: compare a single river value against a threshold.
+ */
+function runThresholdGate(node: StrategyNode, river: River): Record<string, any> {
+  const threshold = Number(node.config.threshold ?? 0);
+  const operator = node.config.operator ?? ">";
+
+  // Find the best value to compare — prefer specific upstream output keys
+  const value = river._gate_result !== undefined
+    ? (river._gate_result === true ? 1 : 0)
+    : river.ec_edge_pct ?? river.ec_edge ?? river.analyst_probability
+      ?? river.scanner_sentiment_score ?? river.consensus_probability ?? 0;
+
+  const condition: Condition = { field: "__resolved__", operator, value: threshold };
+  // Inject the resolved value for evaluation
+  const testRiver = { ...river, __resolved__: value };
+  const passed = evaluateCondition(condition, testRiver);
+
+  return {
+    mcg_satisfied: passed, mcg_input_states: [passed], mcg_mode: "threshold",
+    _gate_result: passed,
+    _gate_details: passed
+      ? `${value} ${operator} ${threshold} — passed`
+      : `${value} ${operator} ${threshold} — blocked`,
   };
 }

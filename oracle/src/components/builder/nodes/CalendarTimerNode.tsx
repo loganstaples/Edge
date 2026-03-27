@@ -1,6 +1,6 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function CalendarTimerNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
@@ -69,6 +69,7 @@ function CalendarTimerNodeComponent({ id, type, data, selected }: any) {
             <input className={inputClass} type="datetime-local" value={config.fire_at ?? ""} onChange={(e) => update("fire_at", e.target.value)} />
           </div>
         )}
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.fired_at && (
           <div className="text-[9px] text-edge-muted/60">
             Last: {new Date(lastOutput.fired_at).toLocaleTimeString()}

@@ -1,6 +1,6 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, selectClass, labelClass, inputClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, selectClass, labelClass } from "./NodeShell";
 
 function ConsensusNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};

@@ -10,6 +10,7 @@ export function useStrategyExecution(
   const [logs, setLogs] = useState<ExecutionLogEntry[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, string>>({});
+  const [nodeOutputs, setNodeOutputs] = useState<Record<string, Record<string, any>>>({});
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const executeTick = useCallback(async () => {
@@ -20,9 +21,19 @@ export function useStrategyExecution(
       if (res.ok) {
         const log: ExecutionLogEntry = await res.json();
         setLogs((prev) => [log, ...prev].slice(0, 50));
-        // Extract node statuses from log
-        if (log.nodeLogs?._nodeStatuses) {
-          setNodeStatuses(log.nodeLogs._nodeStatuses as Record<string, string>);
+        // Extract node statuses and outputs from log
+        if (log.nodeLogs) {
+          if (log.nodeLogs._nodeStatuses) {
+            setNodeStatuses(log.nodeLogs._nodeStatuses as Record<string, string>);
+          }
+          // Extract per-node outputs for lastOutput
+          const outputs: Record<string, Record<string, any>> = {};
+          for (const [key, value] of Object.entries(log.nodeLogs)) {
+            if (key.startsWith("_")) continue;
+            const entry = value as any;
+            outputs[key] = entry?.outputs ?? entry ?? {};
+          }
+          setNodeOutputs(outputs);
         }
       }
     } catch {
@@ -49,5 +60,5 @@ export function useStrategyExecution(
 
   const totalPnl = logs.reduce((sum, log) => sum + (log.pnlDelta || 0), 0);
 
-  return { logs, isExecuting, totalPnl, nodeStatuses };
+  return { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs };
 }

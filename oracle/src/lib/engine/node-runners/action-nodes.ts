@@ -1,9 +1,20 @@
 // src/lib/engine/node-runners/action-nodes.ts
 import type { StrategyNode } from "@/types";
 import type { River, TradeInstruction } from "../executor";
+import { getStrategy, updateStrategy } from "@/lib/db/queries";
+
+/** Map legacy/shorthand node types to canonical runner types */
+const ACTION_TYPE_ALIASES: Record<string, string> = {
+  trade: "trade_advanced",
+  trade_polymarket: "trade_advanced",
+  trade_gemini: "trade_advanced",
+  alert_log: "alert_advanced",
+};
 
 export async function runActionNode(node: StrategyNode, river: River): Promise<Record<string, any>> {
-  switch (node.type) {
+  const type = ACTION_TYPE_ALIASES[node.type] ?? node.type;
+
+  switch (type) {
     case "trade_advanced":
       return runTradeAdvanced(node, river);
     case "alert_advanced":
@@ -11,6 +22,7 @@ export async function runActionNode(node: StrategyNode, river: River): Promise<R
     case "strategy_link_act":
       return runStrategyLinkAct(node, river);
     default:
+      console.log(`[action-nodes] Unknown action node type: ${node.type}`);
       return {};
   }
 }
@@ -30,7 +42,18 @@ function runTradeAdvanced(node: StrategyNode, river: River): Record<string, any>
   const mode = node.config.mode ?? "simulate";
 
   let platform = node.config.platform ?? "auto";
-  if (platform === "auto") platform = river.platform || "polymarket";
+  if (platform === "auto") {
+    // Infer platform from original node type alias, river data, or market source
+    if (node.type === "trade_gemini") {
+      platform = "gemini";
+    } else if (node.type === "trade_polymarket") {
+      platform = "polymarket";
+    } else if (river.instrument_symbol || river.contract_price) {
+      platform = "gemini";
+    } else {
+      platform = river.platform || "polymarket";
+    }
+  }
 
   let direction = node.config.direction ?? "auto";
   if (direction === "auto") {
@@ -42,6 +65,7 @@ function runTradeAdvanced(node: StrategyNode, river: River): Record<string, any>
   const limitPrice = node.config.limit_price ?? 0.5;
   const onlyNew = node.config.only_new ?? true;
   const autoClose = node.config.auto_close ?? false;
+  const scaleIn = node.config.scale_in ?? false;
   const maxPosition = node.config.max_position ?? 100;
 
   if (!positionState[node.id]) {
@@ -50,18 +74,25 @@ function runTradeAdvanced(node: StrategyNode, river: River): Record<string, any>
   const state = positionState[node.id];
 
   const currentPrice = river.price ?? river.contract_price ?? river.yes_price ?? 0.5;
-  const tradeSize = river.ec_suggested_size ?? river.suggested_size ?? node.config.max_position ?? 25;
+  const baseSize = river.ec_suggested_size ?? river.suggested_size ?? node.config.max_position ?? 25;
   const side = direction === "buy_no" ? "NO" : "YES";
+  const currentEdge = river.ec_edge_pct ?? river.ec_edge ?? river.edge ?? 0;
 
-  if (onlyNew && state.qty > 0 && direction !== "sell") {
-    // Already have a position, skip
-  } else if (direction === "sell" || (autoClose && (river.ec_edge ?? river.edge ?? 0) < 0 && state.qty > 0)) {
+  // Scale-in: increase size proportionally to edge strength when enabled
+  const tradeSize = scaleIn && state.qty > 0 && currentEdge > 0
+    ? baseSize * Math.min(1 + currentEdge / 10, 2.5) // Up to 2.5x on strong edge
+    : baseSize;
+
+  if (direction === "sell" || (autoClose && currentEdge < 0 && state.qty > 0)) {
+    // Close position
     const closeValue = state.qty * currentPrice;
     const pnl = closeValue - state.totalCost;
     state.realizedPnl += pnl;
     state.recentTrades.push({ direction: "sell", side, price: currentPrice, qty: state.qty, timestamp: new Date().toISOString() });
     state.qty = 0;
     state.totalCost = 0;
+  } else if (onlyNew && state.qty > 0 && !scaleIn) {
+    // Already have a position, only_new is on, scale_in is off — skip
   } else if (state.totalCost < maxPosition) {
     const sizeToAdd = Math.min(tradeSize, maxPosition - state.totalCost);
     if (sizeToAdd > 0) {
@@ -84,7 +115,7 @@ function runTradeAdvanced(node: StrategyNode, river: River): Record<string, any>
 
   const trade: TradeInstruction = {
     platform,
-    marketId: river.market_id || "unknown",
+    marketId: river.market_id || river.instrument_symbol || "unknown",
     direction: side,
     amount: Math.round(tradeSize * 100) / 100,
     signal: `mode=${mode} type=${orderType} edge=${river.ec_edge_pct ?? "N/A"}%`,
@@ -117,7 +148,9 @@ function runAlertAdvanced(node: StrategyNode, river: River): Record<string, any>
     edge_value: river.ec_edge_pct != null ? `${river.ec_edge_pct}%` : "N/A",
     probability: river.analyst_probability != null ? `${(river.analyst_probability * 100).toFixed(0)}%` : "N/A",
     confidence: river.analyst_confidence || "N/A",
-    price: river.price != null ? `${(river.price * 100).toFixed(0)}¢` : "N/A",
+    price: (river.price ?? river.contract_price ?? river.yes_price ?? river.current_price) != null
+      ? `${((river.price ?? river.contract_price ?? river.yes_price ?? river.current_price) * 100).toFixed(0)}¢`
+      : "N/A",
     direction: river.ec_direction || river.analyst_direction || river.direction || "N/A",
     reasoning: river.analyst_reasoning || "",
     timestamp: new Date().toLocaleString(),
@@ -146,7 +179,25 @@ function runAlertAdvanced(node: StrategyNode, river: River): Record<string, any>
 
   if (node.config.ch_sms && node.config.phone) {
     channels.push("sms");
-    console.log(`[EDGE SMS → ${node.config.phone}] ${message}`);
+    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+    const twilioAuth = process.env.TWILIO_AUTH_TOKEN;
+    const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
+    if (twilioSid && twilioAuth && twilioFrom) {
+      fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${Buffer.from(`${twilioSid}:${twilioAuth}`).toString("base64")}`,
+        },
+        body: new URLSearchParams({
+          To: node.config.phone,
+          From: twilioFrom,
+          Body: `[EDGE ${severity.toUpperCase()}] ${message}`,
+        }).toString(),
+      }).catch((err) => console.error("[EDGE SMS] Twilio error:", err));
+    } else {
+      console.log(`[EDGE SMS → ${node.config.phone}] (Twilio not configured) ${message}`);
+    }
   }
 
   if (node.config.ch_email && node.config.email) {
@@ -170,7 +221,7 @@ function runAlertAdvanced(node: StrategyNode, river: River): Record<string, any>
 // Strategy Link (Act)
 // ---------------------------------------------------------------------------
 
-function runStrategyLinkAct(node: StrategyNode, river: River): Record<string, any> {
+function runStrategyLinkAct(node: StrategyNode, _river: River): Record<string, any> {
   const targetId = node.config.target_strategy_id;
   if (!targetId) {
     return { sla_target_name: null, sla_target_status: null, sla_last_command: null, sla_command_time: null };
@@ -178,35 +229,30 @@ function runStrategyLinkAct(node: StrategyNode, river: River): Record<string, an
 
   const command = node.config.command ?? "signal";
 
-  try {
-    const { getStrategy, updateStrategy } = require("@/lib/db/queries");
-    const target = getStrategy(targetId);
-    if (!target) {
-      return { sla_target_name: "Not found", sla_target_status: null, sla_last_command: command, sla_command_time: new Date().toISOString() };
-    }
-
-    switch (command) {
-      case "pause":
-        updateStrategy(targetId, { status: "paused" });
-        break;
-      case "resume":
-        updateStrategy(targetId, { status: "running" });
-        break;
-      case "adjust_sizing":
-        console.log(`[Strategy Command] Adjust ${target.name} sizing to ${node.config.size_multiplier ?? 1}x`);
-        break;
-      case "signal":
-        console.log(`[Strategy Command] Signal to ${target.name}: ${node.config.signal_value ?? "trigger"}`);
-        break;
-    }
-
-    return {
-      sla_target_name: target.name,
-      sla_target_status: command === "pause" ? "paused" : command === "resume" ? "running" : target.status,
-      sla_last_command: command,
-      sla_command_time: new Date().toISOString(),
-    };
-  } catch {
-    return { sla_target_name: "Error", sla_target_status: null, sla_last_command: command, sla_command_time: new Date().toISOString() };
+  const target = getStrategy(targetId);
+  if (!target) {
+    return { sla_target_name: "Not found", sla_target_status: null, sla_last_command: command, sla_command_time: new Date().toISOString() };
   }
+
+  switch (command) {
+    case "pause":
+      updateStrategy(targetId, { status: "paused" });
+      break;
+    case "resume":
+      updateStrategy(targetId, { status: "running" });
+      break;
+    case "adjust_sizing":
+      console.log(`[Strategy Command] Adjust ${target.name} sizing to ${node.config.size_multiplier ?? 1}x`);
+      break;
+    case "signal":
+      console.log(`[Strategy Command] Signal to ${target.name}: ${node.config.signal_value ?? "trigger"}`);
+      break;
+  }
+
+  return {
+    sla_target_name: target.name,
+    sla_target_status: command === "pause" ? "paused" : command === "resume" ? "running" : target.status,
+    sla_last_command: command,
+    sla_command_time: new Date().toISOString(),
+  };
 }

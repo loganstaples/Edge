@@ -150,6 +150,10 @@ export interface PolymarketMarket {
   neg_risk: boolean;
   minimum_order_size: string;
   minimum_tick_size: string;
+  // Extra fields from the CLOB API (may not always be present)
+  volume_num_24hr?: number;
+  liquidity_clob?: number;
+  last_trade_ts?: string;
 }
 
 export interface PolymarketToken {

@@ -1,18 +1,23 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, useFieldOverrides, OverridePill, inputClass, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function GeminiMarketsFeedNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
   const update = useNodeConfig(id);
   const lastOutput = data?.lastOutput;
+  const overrides = useFieldOverrides(id, type);
 
   return (
     <NodeShell id={id} type={type} selected={selected} status={data?.status}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Event Search</label>
-          <input className={inputClass} value={config.event_search ?? ""} onChange={(e) => update("event_search", e.target.value)} placeholder="Search events..." />
+          {overrides.event_search ? (
+            <OverridePill {...overrides.event_search} />
+          ) : (
+            <input className={inputClass} value={config.event_search ?? ""} onChange={(e) => update("event_search", e.target.value)} placeholder="Search events..." />
+          )}
         </div>
         <div>
           <label className={labelClass}>Watch Mode</label>
@@ -45,6 +50,7 @@ function GeminiMarketsFeedNodeComponent({ id, type, data, selected }: any) {
             <input className={inputClass} type="number" min={0} step={0.5} value={config.alert_threshold ?? 5} onChange={(e) => update("alert_threshold", Number(e.target.value))} />
           </div>
         </div>
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.event_title && (
           <div className="text-[9px] text-edge-muted/60 space-y-0.5 max-h-[48px] overflow-hidden">
             <div className="truncate text-accent-blue">{lastOutput.event_title}</div>

@@ -1,6 +1,6 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function OnChainActivityNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
@@ -47,6 +47,7 @@ function OnChainActivityNodeComponent({ id, type, data, selected }: any) {
             </div>
           </>
         )}
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.tx_hash && (
           <div className="text-[9px] text-edge-muted/60 space-y-0.5 max-h-[48px] overflow-hidden">
             <div className="flex gap-1 items-baseline">

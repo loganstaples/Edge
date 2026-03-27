@@ -1,7 +1,7 @@
 "use client";
 import { memo } from "react";
 import { useEdges, useNodes } from "@xyflow/react";
-import { NodeShell, useNodeConfig, selectClass, inputClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, selectClass, inputClass } from "./NodeShell";
 import { getUpstreamFields } from "@/lib/strategy/upstream";
 
 const COMPARATORS = [">", "<", ">=", "<=", "==", "!=", "between"];

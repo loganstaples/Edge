@@ -1,18 +1,23 @@
 "use client";
 import { memo } from "react";
-import { NodeShell, useNodeConfig, inputClass, selectClass, labelClass } from "./NodeShell";
+import { NodeShell, useNodeConfig, useFieldOverrides, OverridePill, inputClass, selectClass, labelClass, ContextOnlyToggle } from "./NodeShell";
 
 function PolymarketFeedNodeComponent({ id, type, data, selected }: any) {
   const config = data?.config ?? {};
   const update = useNodeConfig(id);
   const lastOutput = data?.lastOutput;
+  const overrides = useFieldOverrides(id, type);
 
   return (
     <NodeShell id={id} type={type} selected={selected} status={data?.status}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Market Search</label>
-          <input className={inputClass} value={config.market_search ?? ""} onChange={(e) => update("market_search", e.target.value)} placeholder="Search markets..." />
+          {overrides.market_search ? (
+            <OverridePill {...overrides.market_search} />
+          ) : (
+            <input className={inputClass} value={config.market_search ?? ""} onChange={(e) => update("market_search", e.target.value)} placeholder="Search markets..." />
+          )}
         </div>
         <div>
           <label className={labelClass}>Watch Mode</label>
@@ -39,6 +44,7 @@ function PolymarketFeedNodeComponent({ id, type, data, selected }: any) {
           <label className={labelClass}>Max Results</label>
           <input className={inputClass} type="number" min={1} max={50} value={config.max_results ?? 10} onChange={(e) => update("max_results", Number(e.target.value))} />
         </div>
+        <ContextOnlyToggle checked={config.context_only ?? false} onChange={(v) => update("context_only", v)} />
         {lastOutput?.event_title && (
           <div className="text-[9px] text-edge-muted/60 space-y-0.5 max-h-[48px] overflow-hidden">
             <div className="truncate text-accent-blue">{lastOutput.event_title}</div>

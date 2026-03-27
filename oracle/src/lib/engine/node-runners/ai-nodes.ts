@@ -2,11 +2,26 @@
 import type { StrategyNode } from "@/types";
 import type { River } from "../executor";
 import Anthropic from "@anthropic-ai/sdk";
+import { fetchActivePolymarkets } from "@/lib/data/polymarket";
 
-const client = new Anthropic();
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) _client = new Anthropic();
+  return _client;
+}
+
+/** Map legacy/shorthand node types to canonical runner types */
+const AI_TYPE_ALIASES: Record<string, string> = {
+  sentiment: "sentiment_scanner",
+  sentiment_analyzer: "sentiment_scanner",
+  ai_probability_estimator: "ai_analyst",
+  edge_calculator: "ai_analyst",
+};
 
 export async function runAINode(node: StrategyNode, river: River): Promise<Record<string, any>> {
-  switch (node.type) {
+  const type = AI_TYPE_ALIASES[node.type] ?? node.type;
+
+  switch (type) {
     case "ai_analyst":
       return await runAIAnalyst(node, river);
     case "sentiment_scanner":
@@ -18,6 +33,7 @@ export async function runAINode(node: StrategyNode, river: River): Promise<Recor
     case "formula":
       return await runFormula(node, river);
     default:
+      console.log(`[ai-nodes] Unknown AI node type: ${node.type}`);
       return {};
   }
 }
@@ -26,63 +42,197 @@ export async function runAINode(node: StrategyNode, river: River): Promise<Recor
 // AI Analyst
 // ---------------------------------------------------------------------------
 
-const DEPTH_CONFIG: Record<string, { maxTokens: number; model: string }> = {
-  fast: { maxTokens: 512, model: "claude-haiku-4-5-20251001" },
-  balanced: { maxTokens: 1024, model: "claude-haiku-4-5-20251001" },
-  thorough: { maxTokens: 2048, model: "claude-haiku-4-5-20251001" },
+const DEPTH_MAX_TOKENS: Record<string, number> = {
+  fast: 512,
+  balanced: 1024,
+  thorough: 2048,
 };
 
-async function runAIAnalyst(node: StrategyNode, river: River): Promise<Record<string, any>> {
-  const instruction = node.config.instruction || "";
-  if (!instruction) return { analyst_probability: null, analyst_confidence: null, analyst_direction: null, analyst_reasoning: "No instruction provided" };
+const MODEL_MAP: Record<string, string> = {
+  "claude-haiku": "claude-haiku-4-5-20251001",
+  "claude-sonnet": "claude-sonnet-4-6",
+  "claude-opus": "claude-opus-4-6",
+};
 
-  const structured = node.config.structured ?? true;
-  const depth = node.config.depth ?? "balanced";
-  const depthCfg = DEPTH_CONFIG[depth] ?? DEPTH_CONFIG.balanced;
+const ANALYST_TOOL: Anthropic.Messages.Tool = {
+  name: "submit_analysis",
+  description: "Submit your prediction market analysis. Call this AFTER you have identified and evaluated the relevant market.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      probability: { type: "number", description: "Estimated true probability (0.01–0.99)" },
+      confidence: { type: "string", enum: ["low", "medium", "high", "very_high"] },
+      direction: { type: "string", enum: ["bullish", "bearish", "neutral"] },
+      reasoning: { type: "string", description: "1-2 paragraph analysis" },
+      market_price: { type: "number", description: "Current price of the identified relevant market (0.01–0.99). Required when you identify a specific market." },
+      market_title: { type: "string", description: "Title of the identified relevant market, if any." },
+      search_terms: { type: "string", description: "Keywords to search for relevant prediction markets downstream (e.g., 'Trump election', 'Bitcoin ETF'). Output this when you want a downstream data source to search for specific markets." },
+    },
+    required: ["probability", "confidence", "direction", "reasoning"],
+  },
+};
 
+const SEARCH_MARKETS_TOOL: Anthropic.Messages.Tool = {
+  name: "search_markets",
+  description: "Search Polymarket for prediction markets matching a query. Use this when the available markets don't contain what you're looking for, or when you need to find markets related to a specific topic. Returns market titles and current prices.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      query: { type: "string", description: "Search terms to find relevant markets (e.g., 'Trump election', 'Bitcoin price', 'Fed rate')" },
+    },
+    required: ["query"],
+  },
+};
+
+/** Execute a search_markets tool call — fetch from Polymarket and filter by query */
+async function executeMarketSearch(query: string): Promise<string> {
+  try {
+    const markets = await fetchActivePolymarkets(3); // fetch up to 3 pages
+    const q = query.toLowerCase();
+    const terms = q.split(/\s+/).filter(Boolean);
+
+    const matched = markets.filter((m) => {
+      const text = (m.question ?? "").toLowerCase();
+      return terms.some((t) => text.includes(t));
+    });
+
+    if (matched.length === 0) {
+      return `No markets found matching "${query}". There are ${markets.length} total active markets.`;
+    }
+
+    const lines = matched.slice(0, 20).map((m, i) => {
+      const yesToken = m.tokens?.find((t) => t.outcome === "Yes");
+      const price = yesToken?.price ?? 0.5;
+      const vol = m.volume_num_24hr ?? 0;
+      return `[${i + 1}] "${m.question}" — price: ${price.toFixed(2)}, volume: $${vol.toLocaleString()}`;
+    });
+
+    return `Found ${matched.length} markets matching "${query}":\n${lines.join("\n")}`;
+  } catch (err) {
+    return `Market search failed: ${err}`;
+  }
+}
+
+function buildAnalystContext(river: River): string {
   const contextParts: string[] = [];
   for (const [key, value] of Object.entries(river)) {
     if (key.startsWith("_") || value == null) continue;
-    contextParts.push(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`);
+    if (key === "available_markets" && Array.isArray(value)) {
+      const marketLines = value.map((m: any, i: number) => {
+        const title = m.event_title ?? m.market_id ?? `market_${i}`;
+        const price = m.yes_price ?? m.contract_price ?? "?";
+        const vol = m.volume_24h ?? m.liquidity ?? "?";
+        return `  [${i + 1}] "${title}" — price: ${price}, volume: ${vol}`;
+      });
+      contextParts.push(`AVAILABLE MARKETS (${value.length}):\n${marketLines.join("\n")}`);
+    } else {
+      contextParts.push(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`);
+    }
   }
-  const contextStr = contextParts.join("\n");
+  return contextParts.join("\n");
+}
 
-  const systemPrompt = structured
-    ? `You are an expert analyst for prediction markets. Follow the user's instruction and analyze the provided data.
+async function runAIAnalyst(node: StrategyNode, river: River): Promise<Record<string, any>> {
+  const instruction = node.config.instruction || "Analyze the following prediction market data. Estimate the true probability of the event occurring based on all available signals, news, and market data.";
 
-Return ONLY valid JSON:
-{
-  "probability": <0.01-0.99>,
-  "confidence": "low"|"medium"|"high"|"very_high",
-  "direction": "bullish"|"bearish"|"neutral",
-  "reasoning": "1-2 paragraph analysis"
-}`
-    : `You are an expert analyst for prediction markets. Follow the user's instruction and analyze the provided data. Provide your analysis as clear, concise text.`;
+  const structured = node.config.structured ?? true;
+  const depth = node.config.depth ?? "balanced";
+  const maxTokens = DEPTH_MAX_TOKENS[depth] ?? DEPTH_MAX_TOKENS.balanced;
+  const model = MODEL_MAP[node.config.model ?? "claude-haiku"] ?? "claude-haiku-4-5-20251001";
+  const contextStr = buildAnalystContext(river);
+
+  const systemPrompt = `You are an expert analyst for prediction markets. Follow the user's instruction and analyze the provided data.
+
+You have two tools:
+1. search_markets — Search Polymarket for markets matching a query. Use this if the AVAILABLE MARKETS list doesn't contain a relevant market, or if you want to find markets related to a specific topic from the input data.
+2. submit_analysis — Submit your final analysis. Include market_price and market_title when you identify a relevant market.
+
+Workflow: Read the input data → check AVAILABLE MARKETS for relevance → if none match, use search_markets to find relevant ones → then submit_analysis with your assessment. If nothing is relevant, submit probability 0.5 with confidence "low".`;
 
   try {
-    const message = await client.messages.create({
-      model: depthCfg.model,
-      max_tokens: depthCfg.maxTokens,
-      system: systemPrompt,
-      messages: [{ role: "user", content: `INSTRUCTION: ${instruction}\n\nDATA:\n${contextStr}` }],
-    });
-    const text = message.content[0].type === "text" ? message.content[0].text : "";
-
     if (!structured) {
+      const message = await getClient().messages.create({
+        model,
+        max_tokens: maxTokens,
+        system: "You are an expert analyst for prediction markets. Follow the user's instruction and analyze the provided data. Provide your analysis as clear, concise text.",
+        messages: [{ role: "user", content: `INSTRUCTION: ${instruction}\n\nDATA:\n${contextStr}` }],
+      });
+      const text = message.content[0].type === "text" ? message.content[0].text : "";
       return { analyst_probability: null, analyst_confidence: null, analyst_direction: null, analyst_reasoning: text, analyst_raw_text: text };
     }
 
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned);
+    // Multi-turn tool use loop: the AI can call search_markets before submit_analysis
+    const tools = [SEARCH_MARKETS_TOOL, ANALYST_TOOL];
+    const messages: Anthropic.Messages.MessageParam[] = [
+      { role: "user", content: `INSTRUCTION: ${instruction}\n\nDATA:\n${contextStr}` },
+    ];
 
-    return {
-      analyst_probability: Math.max(0.01, Math.min(0.99, parsed.probability ?? 0.5)),
-      analyst_confidence: parsed.confidence ?? "medium",
-      analyst_direction: parsed.direction ?? "neutral",
-      analyst_reasoning: parsed.reasoning ?? "",
-      analyst_raw_text: text,
-    };
-  } catch {
+    for (let turn = 0; turn < 3; turn++) { // max 3 turns to prevent infinite loops
+      const message = await getClient().messages.create({
+        model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        tools,
+        messages,
+      });
+
+      // Check if the AI called submit_analysis — we're done
+      const submitBlock = message.content.find(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "submit_analysis"
+      );
+      if (submitBlock) {
+        const parsed = submitBlock.input as Record<string, any>;
+        const result: Record<string, any> = {
+          analyst_probability: Math.max(0.01, Math.min(0.99, parsed.probability ?? 0.5)),
+          analyst_confidence: parsed.confidence ?? "medium",
+          analyst_direction: parsed.direction ?? "neutral",
+          analyst_reasoning: parsed.reasoning ?? "",
+          analyst_raw_text: JSON.stringify(parsed),
+        };
+        if (typeof parsed.market_price === "number" && parsed.market_price > 0) {
+          result.price = Math.max(0.01, Math.min(0.99, parsed.market_price));
+        }
+        if (typeof parsed.market_title === "string" && parsed.market_title) {
+          result.analyst_market_title = parsed.market_title;
+        }
+        if (typeof parsed.search_terms === "string" && parsed.search_terms.trim()) {
+          result.search_terms = parsed.search_terms.trim();
+        }
+        return result;
+      }
+
+      // Check if the AI called search_markets — execute it and continue
+      const searchBlock = message.content.find(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "search_markets"
+      );
+      if (searchBlock) {
+        const query = (searchBlock.input as Record<string, any>).query ?? "";
+        const searchResult = await executeMarketSearch(query);
+
+        // Feed results back to the AI for the next turn
+        messages.push({ role: "assistant", content: message.content });
+        messages.push({
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: searchBlock.id, content: searchResult }],
+        });
+        continue;
+      }
+
+      // No tool call — extract text and return defaults
+      const textBlock = message.content.find((b): b is Anthropic.Messages.TextBlock => b.type === "text");
+      return {
+        analyst_probability: 0.5,
+        analyst_confidence: "low",
+        analyst_direction: "neutral",
+        analyst_reasoning: textBlock?.text ?? "No analysis produced",
+        analyst_raw_text: textBlock?.text ?? "",
+      };
+    }
+
+    // Exhausted turns without submitting — return neutral
+    return { analyst_probability: 0.5, analyst_confidence: "low", analyst_direction: "neutral", analyst_reasoning: "Analysis incomplete — max tool turns reached" };
+  } catch (err) {
+    console.log(`    [ai_analyst] Error: ${err}`);
     return { analyst_probability: 0.5, analyst_confidence: "low", analyst_direction: "neutral", analyst_reasoning: "Analysis failed" };
   }
 }
@@ -93,6 +243,19 @@ Return ONLY valid JSON:
 
 /** Rolling buffer for aggregation windows */
 const sentimentBuffer: Record<string, { score: number; magnitude: number; timestamp: number }[]> = {};
+
+const SENTIMENT_TOOL: Anthropic.Messages.Tool = {
+  name: "submit_sentiment",
+  description: "Submit the sentiment score for the given text",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      score: { type: "number", description: "Sentiment score from -100 (very negative) to 100 (very positive)" },
+      magnitude: { type: "number", description: "Strength of sentiment from 0 (weak) to 100 (strong)" },
+    },
+    required: ["score", "magnitude"],
+  },
+};
 
 async function runSentimentScanner(node: StrategyNode, river: River): Promise<Record<string, any>> {
   const domain = node.config.domain ?? "general";
@@ -110,17 +273,18 @@ async function runSentimentScanner(node: StrategyNode, river: River): Promise<Re
   };
 
   try {
-    const message = await client.messages.create({
+    const message = await getClient().messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 128,
-      system: `Score the sentiment of this text in the context of ${domainContext[domain] ?? domainContext.general}.
-Return ONLY JSON: {"score": <-100 to 100>, "magnitude": <0 to 100>}`,
+      max_tokens: 512,
+      system: `Score the sentiment of this text in the context of ${domainContext[domain] ?? domainContext.general}. Use the submit_sentiment tool.`,
+      tools: [SENTIMENT_TOOL],
+      tool_choice: { type: "tool", name: "submit_sentiment" },
       messages: [{ role: "user", content: text }],
     });
 
-    const responseText = message.content[0].type === "text" ? message.content[0].text : "";
-    const cleaned = responseText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned);
+    const toolBlock = message.content.find((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use");
+    if (!toolBlock) throw new Error("No tool use in response");
+    const parsed = toolBlock.input as Record<string, any>;
     const score = Math.max(-100, Math.min(100, parsed.score ?? 0));
     const magnitude = Math.max(0, Math.min(100, parsed.magnitude ?? 0));
 
@@ -145,7 +309,8 @@ Return ONLY JSON: {"score": <-100 to 100>, "magnitude": <0 to 100>}`,
       scanner_magnitude: Math.round(avgMag),
       scanner_volume_count: entries.length,
     };
-  } catch {
+  } catch (err) {
+    console.log(`    [sentiment] Error: ${err}`);
     return { scanner_sentiment_score: 0, scanner_magnitude: 0, scanner_volume_count: 0 };
   }
 }
@@ -162,24 +327,32 @@ async function runConsensus(node: StrategyNode, river: River): Promise<Record<st
   const probFields = [
     "analyst_probability", "consensus_probability",
     "scanner_sentiment_score", "calibrated_probability",
+    "formula_result",
   ];
 
+  // Collect paired (probability, direction) entries to keep them aligned
   const inputProbs: number[] = [];
   const inputDirections: string[] = [];
 
   for (const key of Object.keys(river)) {
     for (const pf of probFields) {
-      if (key === pf || key.endsWith(`_${pf}`)) {
+      if (key === pf || key.endsWith(`.${pf}`) || key.endsWith(`_${pf}`)) {
         const val = river[key];
+        let prob: number | null = null;
         if (typeof val === "number" && val >= 0 && val <= 1) {
-          inputProbs.push(val);
+          prob = val;
         } else if (typeof val === "number" && val >= -100 && val <= 100) {
-          inputProbs.push((val + 100) / 200);
+          prob = (val + 100) / 200;
+        }
+        if (prob != null) {
+          inputProbs.push(prob);
+          // Find the matching direction key for this probability
+          const dirKey = key.replace(/probability|sentiment_score/, "direction");
+          const dir = typeof river[dirKey] === "string" ? river[dirKey] :
+                      (river.analyst_direction ?? river.consensus_direction ?? (prob > 0.55 ? "bullish" : prob < 0.45 ? "bearish" : "neutral"));
+          inputDirections.push(dir);
         }
       }
-    }
-    if (key.includes("direction") && typeof river[key] === "string") {
-      inputDirections.push(river[key]);
     }
   }
 
