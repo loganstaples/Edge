@@ -6,11 +6,59 @@ import React from "react";
 
 interface AIPromptBarProps {
   onStrategyGenerated: (nodes: any[], connections: any[], name?: string) => void;
+  onStreamStart?: () => void;
+  onStreamingNodes?: (nodes: any[]) => void;
   isLoading: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement>;
   existingNodes?: any[];
   existingEdges?: any[];
   strategyName?: string;
+}
+
+/**
+ * Incrementally extract complete node objects from a partial JSON stream.
+ * Handles nested braces and string escaping correctly.
+ */
+function extractNodesFromStream(text: string, alreadyExtracted: number): any[] {
+  const nodesIdx = text.indexOf('"nodes"');
+  if (nodesIdx === -1) return [];
+
+  const arrayStart = text.indexOf("[", nodesIdx);
+  if (arrayStart === -1) return [];
+
+  const nodes: any[] = [];
+  let depth = 0;
+  let objStart = -1;
+  let objCount = 0;
+  let inStr = false;
+  let escaped = false;
+
+  for (let i = arrayStart + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\" && inStr) { escaped = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+
+    if (ch === "{") {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        objCount++;
+        if (objCount > alreadyExtracted) {
+          try {
+            nodes.push(JSON.parse(text.substring(objStart, i + 1)));
+          } catch { /* incomplete */ }
+        }
+        objStart = -1;
+      }
+    } else if (ch === "]" && depth === 0) {
+      break;
+    }
+  }
+  return nodes;
 }
 
 // idle     → no color border, just subtle static border
@@ -26,7 +74,7 @@ const MODELS = [
   { id: "claude-opus-4-6", label: "Opus 4.6", desc: "Best" },
 ] as const;
 
-export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef, existingNodes, existingEdges, strategyName }: AIPromptBarProps) {
+export function AIPromptBar({ onStrategyGenerated, onStreamStart, onStreamingNodes, isLoading, inputRef, existingNodes, existingEdges, strategyName }: AIPromptBarProps) {
   const hasExistingStrategy = (existingNodes?.length ?? 0) > 0;
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -197,22 +245,67 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef, existing
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to generate strategy");
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to generate strategy");
       }
 
-      const data = await res.json();
-      const { nodes, connections } = data;
+      // Read SSE stream for smooth incremental rendering
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      let extractedCount = 0;
+      let streamStarted = false;
 
-      if (!nodes || !connections) {
-        throw new Error("Invalid response from AI");
-      }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      onStrategyGenerated(nodes, connections, data.name);
-      setPrompt("");
-      // Reset textarea height back to default after clearing
-      if (inputRef?.current) {
-        inputRef.current.style.height = "auto";
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+
+          let event;
+          try {
+            event = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+
+          if (event.type === "delta") {
+            accumulated += event.text;
+
+            // Signal stream start on first delta
+            if (!streamStarted) {
+              streamStarted = true;
+              onStreamStart?.();
+            }
+
+            // Extract newly completed nodes from the stream
+            const newNodes = extractNodesFromStream(accumulated, extractedCount);
+            if (newNodes.length > 0) {
+              extractedCount += newNodes.length;
+              onStreamingNodes?.(newNodes);
+            }
+          } else if (event.type === "complete") {
+            const { nodes, connections } = event.strategy;
+            if (!nodes || !connections) {
+              throw new Error("Invalid response from AI");
+            }
+            onStrategyGenerated(nodes, connections, event.strategy.name);
+            setPrompt("");
+            if (inputRef?.current) {
+              inputRef.current.style.height = "auto";
+            }
+          } else if (event.type === "error") {
+            throw new Error(event.message || "AI streaming error");
+          }
+        }
       }
     } catch (err: any) {
       setError(err.message || "Something went wrong");

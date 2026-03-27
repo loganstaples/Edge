@@ -315,6 +315,10 @@ export interface Strategy {
   name: string;
   description: string | null;
   authorName: string;
+  ownerWallet: string | null;
+  nftMint: string | null;
+  encryptedData: string | null;
+  zgRootHash: string | null;
   nodes: StrategyNode[];
   connections: StrategyConnection[];
   status: StrategyStatus;

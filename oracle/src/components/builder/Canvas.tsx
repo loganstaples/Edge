@@ -18,7 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { useSearchParams } from "next/navigation";
 
 import { nodeTypeComponents } from "./nodes";
-import { NODE_TYPES } from "@/lib/strategy/node-types";
+import { NODE_TYPES, type NodeTypeDefinition } from "@/lib/strategy/node-types";
 import { NodePalette } from "./NodePalette";
 import { StrategyToolbar } from "./StrategyToolbar";
 import { AIPromptBar } from "./AIPromptBar";
@@ -58,6 +58,10 @@ function CanvasInner() {
   const [strategyLoading, setStrategyLoading] = useState(false);
   const [turboMode, setTurboMode] = useState(false);
   const [slowMode, setSlowMode] = useState(false);
+  const [isStreamingIn, setIsStreamingIn] = useState(false);
+  const [streamingSettle, setStreamingSettle] = useState(false);
+  const isStreamingRef = useRef(false);
+  const streamCategoryCountRef = useRef<Record<string, number>>({});
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const aiPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -69,7 +73,7 @@ function CanvasInner() {
     sourceCategory: string;
   } | null>(null);
 
-  const { strategy, isSaving, save, load, deploy, pause } = useStrategy();
+  const { strategy, isSaving, isMinting, save, mintNft, load, deploy, pause, setPublic } = useStrategy();
   const wallet = useWallet();
   const paymentStream = usePaymentStream();
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -121,7 +125,7 @@ function CanvasInner() {
     const id = searchParams.get("id");
     if (id) {
       setStrategyLoading(true);
-      load(id)
+      load(id, wallet.address, wallet.signMessage)
         .then((result) => {
           if (result) {
             setNodes(result.nodes);
@@ -349,9 +353,23 @@ function CanvasInner() {
   }, [nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = useCallback(async () => {
-    const id = await save(strategyName, nodes, edges);
+    if (!wallet.isConnected || !wallet.address) {
+      wallet.connect();
+      return;
+    }
+    const isNew = !strategy?.id;
+    const id = await save(strategyName, nodes, edges, wallet.address, wallet.signMessage);
     window.history.replaceState(null, "", `?id=${id}`);
-  }, [strategyName, nodes, edges, save]);
+
+    // Mint NFT for new strategies
+    if (isNew && wallet.address) {
+      try {
+        await mintNft(id, wallet.address, wallet.signAndSendTransaction);
+      } catch (err: any) {
+        console.warn("NFT minting skipped:", err.message);
+      }
+    }
+  }, [strategyName, nodes, edges, save, mintNft, wallet, strategy?.id]);
 
   const handleDeploy = useCallback(async () => {
     // Show payment modal — user must connect wallet and confirm stream
@@ -366,20 +384,65 @@ function CanvasInner() {
     if (wallet.address && strategy?.id) {
       await paymentStream.startStream(strategy.id, wallet.address, pollingInterval);
     }
-    await deploy();
+    await deploy(wallet.address);
     setStrategyStatus("running");
   }, [deploy, handleSave, wallet.address, strategy?.id, paymentStream, pollingInterval]);
 
   const handlePause = useCallback(async () => {
     await paymentStream.pauseStream();
-    await pause();
+    await pause(wallet.address);
     setStrategyStatus("paused");
-  }, [pause, paymentStream]);
+  }, [pause, paymentStream, wallet.address]);
 
   const handleStop = useCallback(async () => {
     await paymentStream.stopStream();
     setStrategyStatus("stopped");
   }, [paymentStream]);
+
+  // --- Streaming: clear canvas and prepare for incremental node rendering ---
+  const handleStreamStart = useCallback(() => {
+    setIsStreamingIn(true);
+    isStreamingRef.current = true;
+    streamCategoryCountRef.current = {};
+    setNodes([]);
+    setEdges([]);
+  }, [setNodes, setEdges]);
+
+  // --- Streaming: add newly parsed nodes with entrance animation ---
+  const CATEGORY_COL: Record<string, number> = { data: 0, ai: 1, logic: 2, action: 3 };
+
+  const handleStreamingNodes = useCallback(
+    (rawNodes: any[]) => {
+      const nodesToAdd: Node[] = rawNodes.map((n: any) => {
+        const def = NODE_TYPES[n.type] as NodeTypeDefinition | undefined;
+        const cat = def?.category ?? n.category ?? "data";
+        const col = CATEGORY_COL[cat] ?? 0;
+        const row = streamCategoryCountRef.current[cat] ?? 0;
+        streamCategoryCountRef.current[cat] = row + 1;
+
+        return {
+          id: n.id,
+          type: n.type,
+          position: { x: col * 350, y: row * 220 },
+          className: "streaming-node-enter",
+          data: { config: n.config ?? {} },
+        };
+      });
+
+      setNodes((nds) => [...nds, ...nodesToAdd]);
+
+      // Remove entrance class after animation completes
+      const ids = new Set(nodesToAdd.map((n) => n.id));
+      setTimeout(() => {
+        setNodes((nds) =>
+          nds.map((n) =>
+            ids.has(n.id) ? { ...n, className: undefined } : n
+          )
+        );
+      }, 600);
+    },
+    [setNodes]
+  );
 
   const handleStrategyGenerated = useCallback(
     (generatedNodes: any[], connections: any[], name?: string) => {
@@ -399,11 +462,34 @@ function CanvasInner() {
         ...defaultEdgeOptions,
       }));
 
-      setNodes(newNodes);
-      setEdges(newEdges);
+      if (isStreamingRef.current) {
+        // Animate nodes to their final auto-layout positions
+        setStreamingSettle(true);
+        setNodes(newNodes);
+
+        // Fade in edges after positions start settling
+        setTimeout(() => {
+          setEdges(newEdges);
+        }, 350);
+
+        // Fit view and clean up streaming state
+        setTimeout(() => {
+          rfInstance?.fitView({ padding: 0.15, duration: 400 });
+        }, 500);
+
+        setTimeout(() => {
+          setStreamingSettle(false);
+          setIsStreamingIn(false);
+          isStreamingRef.current = false;
+        }, 900);
+      } else {
+        setNodes(newNodes);
+        setEdges(newEdges);
+      }
+
       if (name) setStrategyName(name);
     },
-    [setNodes, setEdges]
+    [setNodes, setEdges, rfInstance]
   );
 
   const handleLoadTemplate = useCallback(
@@ -421,14 +507,19 @@ function CanvasInner() {
         name={strategyName}
         status={strategyStatus}
         isSaving={isSaving}
+        isMinting={isMinting}
         turboMode={turboMode}
         slowMode={slowMode}
+        isPublic={strategy?.isPublic}
+        nftMint={strategy?.nftMint}
+        ownerWallet={strategy?.ownerWallet}
         onNameChange={setStrategyName}
         onSave={handleSave}
         onDeploy={handleDeploy}
         onPause={handlePause}
         onToggleTurbo={() => { setTurboMode((t) => !t); if (!turboMode) setSlowMode(false); }}
         onToggleSlow={() => { setSlowMode((s) => !s); if (!slowMode) setTurboMode(false); }}
+        onTogglePublic={() => setPublic(!strategy?.isPublic, wallet.address)}
         onStop={handleStop}
         stream={paymentStream.stream}
         walletBalance={wallet.balance}
@@ -471,7 +562,7 @@ function CanvasInner() {
             connectionLineStyle={{ stroke: "#9b9bb0", strokeWidth: 2, strokeDasharray: "6 3" }}
             fitView
             proOptions={{ hideAttribution: true }}
-            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""}`}
+            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""} ${streamingSettle ? "streaming-settle" : ""} ${isStreamingIn && !streamingSettle ? "streaming-edges-enter" : ""}`}
           >
             <MiniMap
               nodeColor="#2a2a2e"
@@ -520,6 +611,8 @@ function CanvasInner() {
           <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20">
             <AIPromptBar
               onStrategyGenerated={handleStrategyGenerated}
+              onStreamStart={handleStreamStart}
+              onStreamingNodes={handleStreamingNodes}
               isLoading={aiLoading}
               inputRef={aiPromptRef}
               existingNodes={nodes}

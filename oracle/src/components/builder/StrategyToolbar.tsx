@@ -10,8 +10,12 @@ interface StrategyToolbarProps {
   name: string;
   status: StrategyStatus;
   isSaving?: boolean;
+  isMinting?: boolean;
   turboMode: boolean;
   slowMode: boolean;
+  isPublic?: boolean;
+  nftMint?: string | null;
+  ownerWallet?: string | null;
   onNameChange: (name: string) => void;
   onSave: () => void;
   onDeploy: () => void;
@@ -19,6 +23,7 @@ interface StrategyToolbarProps {
   onStop?: () => void;
   onToggleTurbo: () => void;
   onToggleSlow: () => void;
+  onTogglePublic?: () => void;
   stream?: StreamInfo | null;
   walletBalance?: number;
   walletConnected?: boolean;
@@ -54,7 +59,7 @@ const statusConfig: Record<StrategyStatus, { label: string; color: string; bg: s
   },
 };
 
-export function StrategyToolbar({ name, status, isSaving, turboMode, slowMode, onNameChange, onSave, onDeploy, onPause, onStop, onToggleTurbo, onToggleSlow, stream, walletBalance = 0, walletConnected, walletAddress, onConnectWallet, onDisconnectWallet }: StrategyToolbarProps) {
+export function StrategyToolbar({ name, status, isSaving, isMinting, turboMode, slowMode, isPublic, nftMint, ownerWallet, onNameChange, onSave, onDeploy, onPause, onStop, onToggleTurbo, onToggleSlow, onTogglePublic, stream, walletBalance = 0, walletConnected, walletAddress, onConnectWallet, onDisconnectWallet }: StrategyToolbarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -170,6 +175,52 @@ export function StrategyToolbar({ name, status, isSaving, turboMode, slowMode, o
             )}
             {sc.label}
           </div>
+
+          {/* NFT ownership badge */}
+          {nftMint && (
+            <div
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-mono uppercase tracking-wider"
+              style={{ background: "rgba(167, 139, 250, 0.12)", color: "#a78bfa" }}
+              title={`NFT: ${nftMint}`}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              NFT
+            </div>
+          )}
+          {isMinting && (
+            <div
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-mono uppercase tracking-wider animate-pulse-soft"
+              style={{ background: "rgba(167, 139, 250, 0.12)", color: "#a78bfa" }}
+            >
+              Minting...
+            </div>
+          )}
+
+          {/* Public/Private toggle */}
+          {ownerWallet && walletAddress === ownerWallet && (
+            <button
+              onClick={onTogglePublic}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-mono uppercase tracking-wider transition-colors hover:opacity-80"
+              style={{
+                background: isPublic ? "rgba(52, 211, 153, 0.12)" : "rgba(99, 99, 110, 0.15)",
+                color: isPublic ? "#34d399" : "#63636e",
+              }}
+              title={isPublic ? "Strategy is public — click to make private" : "Strategy is private — click to make public"}
+            >
+              {isPublic ? (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              )}
+              {isPublic ? "Public" : "Private"}
+            </button>
+          )}
         </div>
 
         {/* Right: Actions */}
@@ -257,10 +308,10 @@ export function StrategyToolbar({ name, status, isSaving, turboMode, slowMode, o
           )}
           <button
             onClick={onSave}
-            disabled={isSaving}
+            disabled={isSaving || isMinting}
             className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-edge-border text-edge-text-2 bg-edge-surface hover:border-edge-border-2 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {isSaving ? "Saving…" : "Save"}
+            {isMinting ? "Minting…" : isSaving ? "Saving…" : "Save"}
           </button>
           <button
             onClick={onDeploy}

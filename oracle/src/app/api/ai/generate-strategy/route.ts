@@ -241,63 +241,96 @@ export async function POST(req: Request) {
     ? [{ role: "user", content: userMessage }, { role: "assistant", content: "{" }]
     : [{ role: "user", content: userMessage }];
 
-  let message;
-  try {
-    message = await client.messages.create({
-      model: selectedModel,
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages,
-    });
-  } catch (err: any) {
-    const msg = err?.message || "Unknown error";
-    const status = err?.status || 502;
-    return NextResponse.json(
-      { error: `AI model error (${selectedModel}): ${msg}` },
-      { status }
-    );
-  }
+  const encoder = new TextEncoder();
 
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
-  const text = supportsPrefill ? "{" + raw : raw;
+  const readable = new ReadableStream({
+    start(controller) {
+      // Fire-and-forget: stream deltas, then send processed result
+      (async () => {
+        try {
+          let accumulated = supportsPrefill ? "{" : "";
 
-  // Try direct parse first, then extract the first JSON object as fallback
-  let strategy;
-  try {
-    strategy = JSON.parse(text.trim());
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return NextResponse.json({ error: "Failed to parse AI response", raw: text }, { status: 500 });
-    }
-    try {
-      strategy = JSON.parse(match[0]);
-    } catch {
-      return NextResponse.json({ error: "Failed to parse AI response", raw: text }, { status: 500 });
-    }
-  }
+          const anthropicStream = client.messages.stream({
+            model: selectedModel,
+            max_tokens: 4096,
+            system: systemPrompt,
+            messages,
+          });
 
-  // Fix categories: override whatever the LLM set with the canonical category from NODE_TYPES
-  if (strategy.nodes) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { NODE_TYPES } = require("@/lib/strategy/node-types");
-    for (const node of strategy.nodes) {
-      const def = NODE_TYPES[node.type];
-      if (def) node.category = def.category;
-    }
-  }
+          anthropicStream.on("text", (text: string) => {
+            accumulated += text;
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: "delta", text })}\n\n`)
+            );
+          });
 
-  // Post-processing: enforce structural rules the LLM may have missed
-  if (strategy.nodes && strategy.connections) {
-    enforceStrategyRules(strategy, prompt);
-  }
+          await anthropicStream.finalMessage();
 
-  // Auto-layout: compute clean, structured positions from graph topology
-  if (strategy.nodes && strategy.connections) {
-    autoLayoutStrategy(strategy);
-  }
+          // Parse the full response
+          let strategy;
+          try {
+            strategy = JSON.parse(accumulated.trim());
+          } catch {
+            const match = accumulated.match(/\{[\s\S]*\}/);
+            if (!match) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: "error", message: "Failed to parse AI response" })}\n\n`)
+              );
+              controller.close();
+              return;
+            }
+            try {
+              strategy = JSON.parse(match[0]);
+            } catch {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: "error", message: "Failed to parse AI response" })}\n\n`)
+              );
+              controller.close();
+              return;
+            }
+          }
 
-  return NextResponse.json(strategy);
+          // Fix categories
+          if (strategy.nodes) {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { NODE_TYPES } = require("@/lib/strategy/node-types");
+            for (const node of strategy.nodes) {
+              const def = NODE_TYPES[node.type];
+              if (def) node.category = def.category;
+            }
+          }
+
+          // Post-processing: enforce structural rules the LLM may have missed
+          if (strategy.nodes && strategy.connections) {
+            enforceStrategyRules(strategy, prompt);
+          }
+
+          // Auto-layout: compute clean, structured positions from graph topology
+          if (strategy.nodes && strategy.connections) {
+            autoLayoutStrategy(strategy);
+          }
+
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "complete", strategy })}\n\n`)
+          );
+          controller.close();
+        } catch (err: any) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "error", message: err?.message || "Unknown error" })}\n\n`)
+          );
+          controller.close();
+        }
+      })();
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 /**

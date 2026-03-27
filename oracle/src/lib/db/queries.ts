@@ -169,15 +169,17 @@ export function insertStrategy(strategy: {
   name: string;
   description?: string;
   authorName?: string;
+  ownerWallet?: string;
   nodes: StrategyNode[];
   connections: StrategyConnection[];
 }): string {
   const db = getDb();
   const id = uuid();
   db.prepare(`
-    INSERT INTO strategies (id, name, description, author_name, nodes, connections)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO strategies (id, name, description, author_name, owner_wallet, nodes, connections)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, strategy.name, strategy.description ?? null, strategy.authorName ?? 'anonymous',
+    strategy.ownerWallet ?? null,
     JSON.stringify(strategy.nodes), JSON.stringify(strategy.connections));
   return id;
 }
@@ -201,6 +203,10 @@ export function updateStrategy(id: string, updates: {
   connections?: StrategyConnection[];
   status?: StrategyStatus;
   isPublic?: boolean;
+  nftMint?: string;
+  ownerWallet?: string;
+  encryptedData?: string;
+  zgRootHash?: string;
 }): void {
   const db = getDb();
   const fields: string[] = [];
@@ -212,12 +218,31 @@ export function updateStrategy(id: string, updates: {
   if (updates.connections !== undefined) { fields.push("connections = ?"); values.push(JSON.stringify(updates.connections)); }
   if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status); }
   if (updates.isPublic !== undefined) { fields.push("is_public = ?"); values.push(updates.isPublic ? 1 : 0); }
+  if (updates.nftMint !== undefined) { fields.push("nft_mint = ?"); values.push(updates.nftMint); }
+  if (updates.ownerWallet !== undefined) { fields.push("owner_wallet = ?"); values.push(updates.ownerWallet); }
+  if (updates.encryptedData !== undefined) { fields.push("encrypted_data = ?"); values.push(updates.encryptedData); }
+  if (updates.zgRootHash !== undefined) { fields.push("zg_root_hash = ?"); values.push(updates.zgRootHash); }
 
   if (fields.length === 0) return;
   fields.push("updated_at = datetime('now')");
   values.push(id);
 
   db.prepare(`UPDATE strategies SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+}
+
+/** Check if a wallet owns a strategy */
+export function isStrategyOwner(strategyId: string, walletAddress: string | null): boolean {
+  if (!walletAddress) return false;
+  const db = getDb();
+  const row = db.prepare("SELECT owner_wallet FROM strategies WHERE id = ?").get(strategyId) as any;
+  return row?.owner_wallet === walletAddress;
+}
+
+/** Get all strategies owned by a specific wallet */
+export function getStrategiesByOwner(walletAddress: string): Strategy[] {
+  const db = getDb();
+  const rows = db.prepare("SELECT * FROM strategies WHERE owner_wallet = ? ORDER BY updated_at DESC").all(walletAddress) as any[];
+  return rows.map(rowToStrategy);
 }
 
 export function deleteStrategy(id: string): void {
@@ -409,6 +434,8 @@ function rowToStrategy(row: any): Strategy {
     name: row.name,
     description: row.description,
     authorName: row.author_name,
+    ownerWallet: row.owner_wallet ?? null,
+    nftMint: row.nft_mint ?? null,
     nodes: JSON.parse(row.nodes || "[]"),
     connections: JSON.parse(row.connections || "[]"),
     status: row.status as StrategyStatus,
