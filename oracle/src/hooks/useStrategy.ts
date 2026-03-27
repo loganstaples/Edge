@@ -4,6 +4,7 @@ import type { Strategy, StrategyNode, StrategyConnection } from "@/types";
 import type { Node, Edge } from "@xyflow/react";
 import { NODE_TYPES } from "@/lib/strategy/node-types";
 import { mintStrategyNft } from "@/lib/nft/mint";
+import { deriveEncryptionKey, encryptStrategy, decryptStrategy } from "@/lib/encryption/strategy-cipher";
 import type { Transaction } from "@solana/web3.js";
 
 // Convert React Flow nodes/edges to our DB format
@@ -72,11 +73,14 @@ export function useStrategy() {
     nodes: Node[],
     edges: Edge[],
     walletAddress?: string | null,
+    signMessage?: (message: Uint8Array) => Promise<{ signature: Uint8Array }>,
   ): Promise<string> => {
     setIsSaving(true);
     try {
       const serializedNodes = serializeNodes(nodes);
       const serializedEdges = serializeEdges(edges);
+
+      let strategyId: string;
 
       if (strategy?.id) {
         // Update existing
@@ -89,7 +93,7 @@ export function useStrategy() {
             connections: serializedEdges,
           }),
         });
-        return strategy.id;
+        strategyId = strategy.id;
       } else {
         // Create new — requires wallet
         if (!walletAddress) {
@@ -109,14 +113,34 @@ export function useStrategy() {
           throw new Error(data.error || "Failed to save strategy");
         }
         const data = await res.json();
+        strategyId = data.id;
         // Load the full strategy after creating
-        const fullRes = await fetch(`/api/strategies/${data.id}`, {
+        const fullRes = await fetch(`/api/strategies/${strategyId}`, {
           headers: authHeaders(walletAddress),
         });
         const full = await fullRes.json();
         setStrategy(full);
-        return data.id;
       }
+
+      // Encrypt and upload to 0G Storage (best-effort, non-blocking for UX)
+      if (signMessage && walletAddress) {
+        try {
+          const key = await deriveEncryptionKey(signMessage);
+          const encrypted = await encryptStrategy(
+            { nodes: serializedNodes, connections: serializedEdges },
+            key
+          );
+          await fetch(`/api/strategies/${strategyId}/upload-encrypted`, {
+            method: "POST",
+            headers: authHeaders(walletAddress),
+            body: JSON.stringify({ encryptedData: encrypted }),
+          });
+        } catch (err: any) {
+          console.warn("Encryption/upload skipped:", err.message);
+        }
+      }
+
+      return strategyId;
     } finally {
       setIsSaving(false);
     }
@@ -152,6 +176,7 @@ export function useStrategy() {
   const load = useCallback(async (
     id: string,
     walletAddress?: string | null,
+    signMessage?: (message: Uint8Array) => Promise<{ signature: Uint8Array }>,
   ): Promise<{ nodes: Node[]; edges: Edge[]; name: string; status: string } | null> => {
     const res = await fetch(`/api/strategies/${id}`, {
       headers: authHeaders(walletAddress),
@@ -159,6 +184,25 @@ export function useStrategy() {
     if (!res.ok) return null;
     const data: Strategy = await res.json();
     setStrategy(data);
+
+    // If we have encrypted data and a signMessage function, decrypt client-side
+    if (data.encryptedData && signMessage) {
+      try {
+        const key = await deriveEncryptionKey(signMessage);
+        const decrypted = await decryptStrategy(data.encryptedData, key);
+        return {
+          nodes: deserializeNodes(decrypted.nodes),
+          edges: deserializeEdges(decrypted.connections),
+          name: data.name,
+          status: data.status,
+        };
+      } catch (err: any) {
+        console.warn("Decryption failed:", err.message);
+        // Fall through to empty nodes
+      }
+    }
+
+    // Non-owner or no encrypted data — use whatever the API returned
     return {
       nodes: deserializeNodes(data.nodes),
       edges: deserializeEdges(data.connections),

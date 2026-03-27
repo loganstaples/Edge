@@ -317,6 +317,8 @@ export interface Strategy {
   authorName: string;
   ownerWallet: string | null;
   nftMint: string | null;
+  encryptedData: string | null;
+  zgRootHash: string | null;
   nodes: StrategyNode[];
   connections: StrategyConnection[];
   status: StrategyStatus;

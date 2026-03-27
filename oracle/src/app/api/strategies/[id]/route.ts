@@ -31,16 +31,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
   }
 
-  // Owner gets everything
+  // Owner gets metadata + encrypted data (never plaintext nodes over the wire)
   if (isOwner) {
-    return NextResponse.json(strategy);
+    return NextResponse.json({
+      ...strategy,
+      nodes: [],
+      connections: [],
+      // Client will decrypt encryptedData to recover nodes/connections
+    });
   }
 
-  // Non-owner viewing a public strategy — redact internal details
+  // Non-owner viewing a public strategy — redact everything sensitive
   return NextResponse.json({
     ...strategy,
     nodes: [],
     connections: [],
+    encryptedData: null,
   });
 }
 
@@ -74,6 +80,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     isPublic: body.isPublic,
     nftMint: body.nftMint,
     ownerWallet: body.ownerWallet,
+    encryptedData: body.encryptedData,
+    zgRootHash: body.zgRootHash,
   });
 
   return NextResponse.json({ ok: true });

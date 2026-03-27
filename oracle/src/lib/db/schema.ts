@@ -139,7 +139,13 @@ export function initializeDatabase(): void {
   if (!colNames.has("nft_mint")) {
     db.exec("ALTER TABLE strategies ADD COLUMN nft_mint TEXT");
   }
+  if (!colNames.has("encrypted_data")) {
+    db.exec("ALTER TABLE strategies ADD COLUMN encrypted_data TEXT");
+  }
+  if (!colNames.has("zg_root_hash")) {
+    db.exec("ALTER TABLE strategies ADD COLUMN zg_root_hash TEXT");
+  }
 
-  // Index for fast wallet-based lookups
+  // Indexes for fast lookups
   db.exec("CREATE INDEX IF NOT EXISTS idx_strategies_owner ON strategies(owner_wallet)");
 }

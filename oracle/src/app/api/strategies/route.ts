@@ -23,8 +23,11 @@ export async function GET(req: Request) {
     const visible = all
       .filter((s) => s.ownerWallet === walletAddress || s.isPublic)
       .map((s) => {
-        if (s.ownerWallet === walletAddress) return s;
-        return { ...s, nodes: [], connections: [] };
+        // Never send plaintext nodes in list view — owner decrypts via individual load
+        if (s.ownerWallet === walletAddress) {
+          return { ...s, nodes: [], connections: [] };
+        }
+        return { ...s, nodes: [], connections: [], encryptedData: null };
       });
     return NextResponse.json(visible);
   }

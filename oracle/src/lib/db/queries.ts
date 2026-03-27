@@ -205,6 +205,8 @@ export function updateStrategy(id: string, updates: {
   isPublic?: boolean;
   nftMint?: string;
   ownerWallet?: string;
+  encryptedData?: string;
+  zgRootHash?: string;
 }): void {
   const db = getDb();
   const fields: string[] = [];
@@ -218,6 +220,8 @@ export function updateStrategy(id: string, updates: {
   if (updates.isPublic !== undefined) { fields.push("is_public = ?"); values.push(updates.isPublic ? 1 : 0); }
   if (updates.nftMint !== undefined) { fields.push("nft_mint = ?"); values.push(updates.nftMint); }
   if (updates.ownerWallet !== undefined) { fields.push("owner_wallet = ?"); values.push(updates.ownerWallet); }
+  if (updates.encryptedData !== undefined) { fields.push("encrypted_data = ?"); values.push(updates.encryptedData); }
+  if (updates.zgRootHash !== undefined) { fields.push("zg_root_hash = ?"); values.push(updates.zgRootHash); }
 
   if (fields.length === 0) return;
   fields.push("updated_at = datetime('now')");
