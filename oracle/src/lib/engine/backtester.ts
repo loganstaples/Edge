@@ -9,7 +9,6 @@ import { fetchAllActiveGeminiEvents, fetchGeminiTicker } from "@/lib/data/gemini
 import { fetchActivePolymarkets } from "@/lib/data/polymarket";
 import { getRecentArticles } from "@/lib/db/queries";
 import { fetchHistoricalNews } from "@/lib/data/news";
-import { computeEdge } from "./edge";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -335,105 +334,9 @@ async function cachedSentiment(text: string): Promise<Record<string, any>> {
   }
 }
 
-async function _cachedAICustom(prompt: string, riverStr: string): Promise<Record<string, any>> {
-  const cacheKey = `custom:${prompt.slice(0, 50)}:${riverStr.slice(0, 50)}`;
-  if (aiCache.has(cacheKey)) return aiCache.get(cacheKey)!;
-
-  try {
-    const client = getAnthropicClient();
-    const message = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      system: prompt,
-      messages: [{ role: "user", content: riverStr }],
-    });
-    const text = message.content[0].type === "text" ? message.content[0].text : "";
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    try {
-      const parsed = JSON.parse(cleaned);
-      const result = typeof parsed === "object" && !Array.isArray(parsed) ? parsed : { ai_response: parsed };
-      aiCache.set(cacheKey, result);
-      return result;
-    } catch {
-      const result = { ai_response: text };
-      aiCache.set(cacheKey, result);
-      return result;
-    }
-  } catch {
-    return { ai_response: null };
-  }
-}
-
 // ---------------------------------------------------------------------------
-// 4. Deterministic node runners (logic, edge_calc, actions)
+// 4. Deterministic node runners (logic, actions)
 // ---------------------------------------------------------------------------
-
-interface Condition { field: string; operator: string; value: string | number }
-
-function _evalCondition(c: Condition, river: River): boolean {
-  const v = river[c.field];
-  if (v === undefined || v === null) return false;
-  const target = typeof v === "number" ? Number(c.value) : c.value;
-  switch (c.operator) {
-    case ">": return v > target;
-    case "<": return v < target;
-    case ">=": return v >= target;
-    case "<=": return v <= target;
-    case "==": return String(v) === String(target);
-    case "!=": return String(v) !== String(target);
-    case "contains": return String(v).toLowerCase().includes(String(target).toLowerCase());
-    case "between": { const [lo, hi] = String(c.value).split(",").map(Number); return v >= lo && v <= hi; }
-    default: return false;
-  }
-}
-
-function _runEdgeCalc(river: River): Record<string, any> {
-  const aiProb = river.ai_probability;
-  const marketPrice = river.price;
-  if (aiProb == null || marketPrice == null) {
-    return {
-      edge: null, edge_pct: null, effective_edge: null, signal_strength: "none",
-      direction: null, composite_confidence: null, kelly_fraction: null,
-      suggested_size: null, bayesian_edge: null, liquidity_score: null,
-      kl_divergence: null, information_ratio: null, expected_value: null,
-    };
-  }
-
-  const confidence = river.ai_confidence || "medium";
-  const validConfidence = (["low", "medium", "high"].includes(confidence) ? confidence : "medium") as "low" | "medium" | "high";
-
-  const result = computeEdge(aiProb, marketPrice, validConfidence, river.platform || "polymarket", {
-    confidence: validConfidence,
-    sourceCount: river.source_count ?? 1,
-    keyFactorCount: river.key_factor_count ?? (river.key_factors?.length ?? 2),
-    spread: river.spread ?? 0.01,
-    volume: river.volume ?? 0,
-    newsAgeHours: 1,
-    sentimentScore: river.sentiment_score ?? undefined,
-  });
-
-  return {
-    edge: result.edge,
-    edge_pct: parseFloat((result.edge * 100).toFixed(1)),
-    effective_edge: result.effectiveEdge,
-    effective_edge_pct: parseFloat((result.effectiveEdge * 100).toFixed(1)),
-    calibrated_probability: result.calibratedProbability,
-    signal_strength: result.signalStrength,
-    direction: result.edge > 0 ? "bullish" : result.edge < 0 ? "bearish" : "neutral",
-    ai_uncertainty: result.aiUncertainty,
-    kl_divergence: result.klDivergence,
-    information_ratio: result.informationRatio,
-    composite_confidence: result.compositeConfidence,
-    kelly_fraction: result.kellyFraction,
-    suggested_size: result.suggestedSize,
-    bayesian_edge: result.bayesianEdge,
-    liquidity_score: result.liquidityScore,
-    market_efficiency: result.marketEfficiency,
-    expected_value: result.expectedValue,
-    risk_reward_ratio: result.riskRewardRatio,
-    evpi: result.evpi,
-  };
-}
 
 function runLogicNode(node: StrategyNode, river: River): Record<string, any> {
   // Import and delegate to the real logic runner for new node types
@@ -451,7 +354,97 @@ function runLogicNode(node: StrategyNode, river: River): Record<string, any> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// History tracker for backtests — uses tick timestamp instead of Date.now()
+// so the time_window config actually represents historical time, not wall time.
+// ---------------------------------------------------------------------------
+
+const btHistoryBuffers: Record<string, { value: number; timestamp: number }[]> = {};
+
+function runBacktestHistoryTracker(
+  node: StrategyNode,
+  river: River,
+  tickTs: number,
+): Record<string, any> {
+  const trackField = node.config.track_field ?? "analyst_probability";
+  const maxDepth = node.config.depth ?? 25;
+  const timeWindow = node.config.time_window ?? "1h";
+
+  const currentValue = river[trackField];
+  if (currentValue == null || typeof currentValue !== "number") {
+    return {
+      history_current: null, history_values: [], history_trend: "flat",
+      history_avg: null, history_min: null, history_max: null,
+      history_streak: 0, history_rate_of_change: 0,
+    };
+  }
+
+  // Key by node + market so different markets don't mix in the same buffer
+  const marketKey = river.market_id ?? river.event_title ?? "default";
+  const bufferKey = `${node.id}:${marketKey}`;
+
+  if (!btHistoryBuffers[bufferKey]) btHistoryBuffers[bufferKey] = [];
+  btHistoryBuffers[bufferKey].push({ value: currentValue, timestamp: tickTs });
+
+  const windowSec: Record<string, number> = {
+    "5m": 300, "15m": 900, "1h": 3600,
+    "4h": 14400, "24h": 86400, "7d": 604800,
+  };
+  const cutoff = tickTs - (windowSec[timeWindow] ?? 3600);
+  btHistoryBuffers[bufferKey] = btHistoryBuffers[bufferKey].filter((e) => e.timestamp >= cutoff);
+
+  if (btHistoryBuffers[bufferKey].length > maxDepth) {
+    btHistoryBuffers[bufferKey] = btHistoryBuffers[bufferKey].slice(-maxDepth);
+  }
+
+  const entries = btHistoryBuffers[bufferKey];
+  const values = entries.map((e) => e.value);
+
+  if (values.length <= 1) {
+    return {
+      history_current: currentValue, history_values: values, history_trend: "flat",
+      history_avg: currentValue, history_min: currentValue, history_max: currentValue,
+      history_streak: 1, history_rate_of_change: 0,
+    };
+  }
+
+  const avg = values.reduce((s, v) => s + v, 0) / values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  const n = values.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += i; sumY += values[i]; sumXY += i * values[i]; sumXX += i * i;
+  }
+  const slope = n > 1 ? (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX) : 0;
+  const trend = slope > 0.001 ? "rising" : slope < -0.001 ? "falling" : "flat";
+
+  let streak = 1;
+  if (values.length >= 2) {
+    const lastDir = values[values.length - 1] >= values[values.length - 2] ? "up" : "down";
+    for (let i = values.length - 2; i > 0; i--) {
+      const dir = values[i] >= values[i - 1] ? "up" : "down";
+      if (dir === lastDir) streak++; else break;
+    }
+  }
+
+  const rateOfChange = (values[values.length - 1] - values[0]) / (values.length - 1);
+
+  return {
+    history_current: currentValue,
+    history_values: values,
+    history_trend: trend,
+    history_avg: Math.round(avg * 10000) / 10000,
+    history_min: min,
+    history_max: max,
+    history_streak: streak,
+    history_rate_of_change: Math.round(rateOfChange * 10000) / 10000,
+  };
+}
+
 interface TradeAction {
+  action: "buy" | "sell";
   platform: string;
   marketId: string;
   direction: "YES" | "NO";
@@ -470,21 +463,31 @@ function runActionNode(
   if (node.type === "trade_advanced" || node.type === "trade") {
     let platform = node.config.platform ?? "auto";
     if (platform === "auto") platform = river.platform || "polymarket";
-    let side = node.config.side ?? "auto";
-    if (side === "auto") {
-      const dir = river.direction || "bullish";
-      side = dir === "bearish" ? "NO" : "YES";
+
+    // Read direction from config — supports "buy_yes", "buy_no", "sell", "auto"
+    let direction = node.config.direction ?? node.config.side ?? "auto";
+    if (direction === "auto") {
+      const dir = river.ec_direction ?? river.direction ?? "bullish";
+      direction = dir === "bearish" ? "buy_no" : "buy_yes";
     }
-    const configuredSize = node.config.size_usd ?? 25;
-    const kellySize = river.suggested_size;
-    const useKelly = node.config.size_mode === "kelly" && kellySize != null && kellySize > 0;
+
+    // Determine action (buy or sell) and side (YES or NO)
+    const isSell = direction === "sell" ||
+      (node.config.auto_close && (river.ec_edge_pct ?? river.ec_edge ?? 0) < 0);
+    const side: "YES" | "NO" = direction === "buy_no" ? "NO" : "YES";
+
+    const configuredSize = node.config.size_usd ?? node.config.max_position ?? 25;
+    const kellySize = river.ec_suggested_size ?? river.suggested_size;
+    const useKelly = (node.config.sizing_mode === "kelly" || node.config.size_mode === "kelly")
+      && kellySize != null && kellySize > 0;
     const amount = useKelly ? Math.min(kellySize, configuredSize * 4) : configuredSize;
 
     return {
       trade: {
+        action: isSell ? "sell" : "buy",
         platform,
         marketId: river.market_id || "unknown",
-        direction: side === "NO" ? "NO" : "YES",
+        direction: side,
         amount: Math.round(amount * 100) / 100,
         eventTitle: river.event_title || "Unknown",
         exitStrategy: node.config.exit_strategy ?? "hold_ticks",
@@ -576,13 +579,31 @@ async function _runReactiveSource(
   }
 
   const maxResults = node.config.max_results ?? 5;
-  const keywords = searchTerms.toLowerCase().split(/\s+/).filter(Boolean);
+  const rawKeywords = searchTerms.toLowerCase().split(/\s+/).filter(Boolean);
+  // Filter out stop words to prevent overly broad matching
+  const STOP_WORDS = new Set(["the", "of", "in", "a", "an", "to", "for", "and", "or", "is", "it", "on", "at", "by", "be", "will", "has", "have", "can", "do", "does"]);
+  const effectiveKeywords = rawKeywords.filter((kw) => kw.length > 2 && !STOP_WORDS.has(kw));
+  const keywords = effectiveKeywords.length > 0 ? effectiveKeywords : rawKeywords;
+  // Full phrase for substring matching (catches "artificial intelligence" in one go)
+  const fullPhrase = keywords.join(" ");
+
+  // Scoring: check full-phrase substring match first, then require at least
+  // 1/3 of individual keywords (min 1). This balances specificity with recall.
+  const minMatchCount = Math.max(1, Math.ceil(keywords.length / 3));
+
+  function matchesSearch(text: string): boolean {
+    // Full phrase match is always a pass
+    if (fullPhrase.length > 3 && text.includes(fullPhrase)) return true;
+    // Otherwise count individual keyword hits
+    const matchCount = keywords.filter((kw: string) => text.includes(kw)).length;
+    return matchCount >= minMatchCount;
+  }
 
   if (node.type === "polymarket_feed") {
     const filtered = polymarketPool
       .filter((m) => {
         const text = (m.question ?? "").toLowerCase();
-        return keywords.some((kw: string) => text.includes(kw));
+        return matchesSearch(text);
       })
       .slice(0, maxResults);
 
@@ -627,7 +648,7 @@ async function _runReactiveSource(
     const filtered = geminiPool
       .filter((e) => {
         const text = (e.title ?? "").toLowerCase();
-        return keywords.some((kw: string) => text.includes(kw));
+        return matchesSearch(text);
       })
       .slice(0, maxResults);
 
@@ -677,6 +698,9 @@ export async function runBacktest(
   strategy: Strategy,
   config: Partial<BacktestConfig> = {},
 ): Promise<BacktestResult> {
+  // Clear per-run state caches (NOT aiCache — AI results are deterministic per input)
+  for (const k of Object.keys(btHistoryBuffers)) delete btHistoryBuffers[k];
+
   const periodMs: Record<string, number> = {
     "1d": 24 * 60 * 60 * 1000,
     "1w": 7 * 24 * 60 * 60 * 1000,
@@ -763,6 +787,59 @@ export async function runBacktest(
   const geminiSearchPool = await fetchAllActiveGeminiEvents().catch(() => [] as any[]);
   const historyCache = new Map<string, { t: number; p: number }[]>();
 
+  // Pre-fetch crypto price history for crypto_price nodes
+  const cryptoHistoryByPair = new Map<string, { t: number; p: number }[]>();
+  const cryptoNodes = sourceNodes.filter((n) => n.type === "crypto_price");
+  for (const cn of cryptoNodes) {
+    const token = (cn.config.token ?? "BTC").toUpperCase();
+    const pair = `${token}usd`;
+    if (!cryptoHistoryByPair.has(pair)) {
+      try {
+        const url = `${GEMINI_BASE}/v2/candles/${pair}/1hr`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const candles = await res.json();
+          const history = (candles ?? [])
+            .map((c: [number, number, number, number, number, number]) => ({
+              t: Math.floor(c[0] / 1000),
+              p: c[4], // close price
+            }))
+            .sort((a: { t: number }, b: { t: number }) => a.t - b.t);
+          cryptoHistoryByPair.set(pair, history);
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Pre-fetch on-chain (whale) trade history from Gemini for onchain_activity nodes
+  const onchainTradeHistory: { timestamp: number; token: string; dollar_value: number; from_address: string; to_address: string; tx_hash: string; chain: string }[] = [];
+  const onchainNodes = sourceNodes.filter((n) => n.type === "onchain_activity");
+  if (onchainNodes.length > 0) {
+    const pairs = ["btcusd", "ethusd", "solusd"];
+    for (const pair of pairs) {
+      try {
+        const res = await fetch(`${GEMINI_BASE}/v1/trades/${pair}?limit_trades=200`);
+        if (res.ok) {
+          const trades = await res.json();
+          const token = pair.replace("usd", "").toUpperCase();
+          for (const tr of trades ?? []) {
+            const dollarValue = parseFloat(tr.price) * parseFloat(tr.amount);
+            onchainTradeHistory.push({
+              timestamp: tr.timestampms ? Math.floor(tr.timestampms / 1000) : tr.timestamp,
+              token,
+              dollar_value: dollarValue,
+              from_address: `0x${(tr.tid ?? "").toString(16).padStart(40, "a")}`,
+              to_address: `0x${(tr.tid ?? "").toString(16).padStart(40, "b")}`,
+              tx_hash: `0x${(tr.tid ?? "").toString(16).padStart(64, "0")}`,
+              chain: token === "SOL" ? "solana" : "ethereum",
+            });
+          }
+        }
+      } catch { /* skip */ }
+    }
+    onchainTradeHistory.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
   // --- Phase 2: Pre-fetch AI estimates (cached, one call per unique event) ---
   // Identify which AI node types are in the graph
   const hasAIEstimate = downstream.some((n) => n.type === "ai_analyst" || n.type === "ai_estimate");
@@ -810,6 +887,40 @@ export async function runBacktest(
     stopLoss: number;
   }[] = [];
 
+  // Per-position price history for momentum-based exit detection.
+  // If the strategy has a router that gates on price movement (sell when stalled),
+  // we check each open position's recent price change and close when it stalls.
+  const positionPriceHistory: Map<string, number[]> = new Map();
+  const posKey = (pos: typeof openPositions[number]) => `${pos.marketId}:${pos.entryTs}`;
+
+  // Detect if the strategy has a sell-on-stall pattern:
+  // router with rate_of_change route → sell node on default/stall route
+  const hasStallSellPattern = downstream.some((n) => {
+    if (n.type !== "router") return false;
+    const routes = n.config.routes ?? [];
+    // Find a default/stall route that connects to a sell node
+    const stallRoute = routes.find((r: any) => r.is_default || (r.field?.includes("rate_of_change") && r.comparator === "<="));
+    if (!stallRoute) return false;
+    const routeIdx = routes.indexOf(stallRoute);
+    const routeHandle = `route_${routeIdx + 1}`;
+    const downstream_conn = strategy.connections.find(
+      (c) => c.source_id === n.id && c.source_handle === routeHandle,
+    );
+    if (!downstream_conn) return false;
+    const targetNode = strategy.nodes.find((nd) => nd.id === downstream_conn.target_id);
+    return targetNode?.type === "trade_advanced" && targetNode?.config?.direction === "sell";
+  });
+
+  // Extract the stall threshold from the router config
+  let stallThreshold = 0.005;
+  if (hasStallSellPattern) {
+    const routerNode = downstream.find((n) => n.type === "router");
+    const movingRoute = routerNode?.config?.routes?.find(
+      (r: any) => r.field?.includes("rate_of_change") && (r.comparator === ">" || r.comparator === ">="),
+    );
+    if (movingRoute?.value) stallThreshold = parseFloat(movingRoute.value);
+  }
+
   let equity = cfg.startingCapital;
   let peak = equity;
   let maxDD = 0;
@@ -854,6 +965,32 @@ export async function runBacktest(
         }
       }
 
+      // Check momentum-stall exit: if the strategy has a "sell when price stalls"
+      // pattern (router → sell node), close positions whose price has stopped moving.
+      // Need at least 3 ticks of history to measure rate of change.
+      if (!shouldClose && hasStallSellPattern && t - pos.entryTick >= 2) {
+        const pk = posKey(pos);
+        if (!positionPriceHistory.has(pk)) positionPriceHistory.set(pk, []);
+        const hist = positionPriceHistory.get(pk)!;
+        hist.push(currentPrice);
+        // Keep last 5 data points
+        if (hist.length > 5) hist.shift();
+
+        if (hist.length >= 3) {
+          // Rate of change = average price change per tick over recent history
+          const roc = Math.abs(hist[hist.length - 1] - hist[0]) / (hist.length - 1);
+          if (roc <= stallThreshold) {
+            shouldClose = true;
+            exitReason = `sell signal (price stalled, roc=${roc.toFixed(4)} <= ${stallThreshold})`;
+          }
+        }
+      } else if (hasStallSellPattern && !positionPriceHistory.has(posKey(pos))) {
+        // Start tracking even before we check
+        positionPriceHistory.set(posKey(pos), [currentPrice]);
+      } else if (hasStallSellPattern && positionPriceHistory.has(posKey(pos))) {
+        positionPriceHistory.get(posKey(pos))!.push(currentPrice);
+      }
+
       if (shouldClose) {
         allTrades.push({
           tick: t,
@@ -876,6 +1013,7 @@ export async function runBacktest(
     }
     // Remove closed positions (iterate in reverse so indices stay valid)
     for (const idx of toClose) {
+      positionPriceHistory.delete(posKey(openPositions[idx]));
       openPositions.splice(idx, 1);
     }
 
@@ -884,23 +1022,46 @@ export async function runBacktest(
 
     for (const src of sourceNodes) {
       if (src.type === "news_feed" || src.type === "news_monitor") {
-        // Feed real articles that existed before this tick's timestamp
-        const tickDate = new Date(tickTs * 1000);
-        const availableArticles = articles.filter(
-          (a) => new Date(a.publishedAt) <= tickDate,
-        );
-        const topics = (src.config.topics || "")
-          .split(",")
+        // Feed articles published within the current tick's time window so
+        // trades are distributed across the entire backtest, not clustered at
+        // the end.  Falls back to a wider cumulative window when no articles
+        // exist in the narrow window (ensures early ticks still get data).
+        const windowStart = tickTs - Math.floor(tickInterval);
+        const windowEnd = tickTs;
+        const tickDate = new Date(windowEnd * 1000);
+        const windowStartDate = new Date(windowStart * 1000);
+
+        const topics = (src.config.keywords || src.config.topics || "")
+          .split(/[\s,]+/)
           .map((t: string) => t.trim().toLowerCase())
           .filter(Boolean);
 
-        const filtered = availableArticles
+        // Prefer articles published in *this* tick window
+        let filtered = articles
+          .filter((a) => {
+            const pub = new Date(a.publishedAt);
+            return pub > windowStartDate && pub <= tickDate;
+          })
           .filter((a) => {
             if (topics.length === 0) return true;
             const text = `${a.title} ${a.description || ""}`.toLowerCase();
             return topics.some((topic: string) => text.includes(topic));
           })
-          .slice(0, 5);
+          .slice(0, 3);
+
+        // Fallback: spread all matching articles across ticks evenly
+        if (filtered.length === 0) {
+          const topicFiltered = articles.filter((a) => {
+            if (topics.length === 0) return true;
+            const text = `${a.title} ${a.description || ""}`.toLowerCase();
+            return topics.some((topic: string) => text.includes(topic));
+          });
+          if (topicFiltered.length > 0) {
+            const chunkSize = Math.max(1, Math.ceil(topicFiltered.length / cfg.ticks));
+            const start = t * chunkSize;
+            filtered = topicFiltered.slice(start, start + chunkSize).slice(0, 3);
+          }
+        }
 
         for (const a of filtered) {
           rivers.push({
@@ -915,6 +1076,115 @@ export async function runBacktest(
         continue;
       }
 
+      if (src.type === "crypto_price") {
+        const token = (src.config.token ?? "BTC").toUpperCase();
+        const pair = `${token}usd`;
+        const history = cryptoHistoryByPair.get(pair);
+        if (history && history.length > 0) {
+          const price = priceAt(history, tickTs);
+          if (price != null) {
+            // Compute change from previous tick
+            const prevPrice = priceAt(history, tickTs - Math.floor(tickInterval));
+            const changePct = prevPrice && prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+            rivers.push({
+              current_price: price,
+              change_pct: Math.round(changePct * 100) / 100,
+              change_abs: prevPrice ? Math.round((price - prevPrice) * 100) / 100 : 0,
+              volume_24h: 0,
+              high_24h: price,
+              low_24h: price,
+              token,
+            });
+          }
+        }
+        continue;
+      }
+
+      if (src.type === "onchain_activity") {
+        const minValue = parseFloat(src.config.min_value ?? "0");
+        const chain = src.config.chain ?? "all";
+        // Find trades near this tick's timestamp
+        const windowStart = tickTs - Math.floor(tickInterval);
+        const windowEnd = tickTs;
+        const matching = onchainTradeHistory.filter((tr) => {
+          if (tr.timestamp < windowStart || tr.timestamp > windowEnd) return false;
+          if (minValue > 0 && tr.dollar_value < minValue) return false;
+          if (chain !== "all" && tr.chain !== chain) return false;
+          return true;
+        });
+        for (const tr of matching.slice(0, 5)) {
+          rivers.push({
+            tx_hash: tr.tx_hash,
+            from_address: tr.from_address,
+            to_address: tr.to_address,
+            token: tr.token,
+            dollar_value: tr.dollar_value,
+            chain: tr.chain,
+            block_timestamp: new Date(tr.timestamp * 1000).toISOString(),
+          });
+        }
+        continue;
+      }
+
+      if (src.type === "twitter_monitor") {
+        // In backtest, use historical news as tweet source (same as live mode's synthetic approach).
+        // Per-tick window so tweets are distributed, not clustered at end.
+        const windowStart = tickTs - Math.floor(tickInterval);
+        const windowEnd = tickTs;
+        const tickDate = new Date(windowEnd * 1000);
+        const windowStartDate = new Date(windowStart * 1000);
+        const twKeywords = (src.config.keywords ?? "").split(/[\s,]+/).filter(Boolean).map((k: string) => k.toLowerCase());
+
+        let twFiltered = articles
+          .filter((a) => {
+            const pub = new Date(a.publishedAt);
+            return pub > windowStartDate && pub <= tickDate;
+          })
+          .filter((a) => {
+            if (twKeywords.length === 0) return true;
+            const text = a.title.toLowerCase();
+            return twKeywords.some((kw: string) => text.includes(kw));
+          })
+          .slice(0, 3);
+
+        // Fallback: spread articles evenly across ticks
+        if (twFiltered.length === 0) {
+          const topicFiltered = articles.filter((a) => {
+            if (twKeywords.length === 0) return true;
+            const text = a.title.toLowerCase();
+            return twKeywords.some((kw: string) => text.includes(kw));
+          });
+          if (topicFiltered.length > 0) {
+            const chunkSize = Math.max(1, Math.ceil(topicFiltered.length / cfg.ticks));
+            const start = t * chunkSize;
+            twFiltered = topicFiltered.slice(start, start + chunkSize).slice(0, 3);
+          }
+        }
+
+        for (const a of twFiltered) {
+          rivers.push({
+            tweet_text: a.title,
+            author_handle: `@${a.source.replace(/\s+/g, "").toLowerCase()}`,
+            author_followers: 50000,
+            author_verified: true,
+            timestamp: a.publishedAt,
+            retweet_count: 0,
+            like_count: 0,
+          });
+        }
+        continue;
+      }
+
+      if (src.type === "calendar_timer") {
+        // In backtest, fire on every tick
+        rivers.push({
+          fired_at: new Date(tickTs * 1000).toISOString(),
+          fire_reason: "backtest_tick",
+          next_fire_at: new Date((tickTs + Math.floor(tickInterval)) * 1000).toISOString(),
+        });
+        continue;
+      }
+
       // market feed nodes (polymarket_feed, gemini_markets_feed, etc.)
       const markets = marketsBySource[src.id] ?? [];
       for (const mkt of markets) {
@@ -922,53 +1192,79 @@ export async function runBacktest(
         if (price == null) continue;
         marketsScanned++;
 
-        rivers.push({
+        // Use the same field names as the live executor data sources so the
+        // real edge_calculator / trade_advanced / alert_advanced read them.
+        const base: River = {
           event_title: mkt.eventTitle,
           market_id: mkt.marketId,
           platform: mkt.platform,
-          price,
-          bid: Math.max(0.01, price - 0.005),
-          ask: Math.min(0.99, price + 0.005),
           spread: 0.01,
-          volume: 0,
+          volume_24h: 0,
           category: mkt.category,
-          expiry_date: "",
-        });
+        };
+        if (mkt.platform === "polymarket") {
+          base.yes_price = price;
+          base.no_price = parseFloat((1 - price).toFixed(4));
+          base.liquidity = 0;
+        } else {
+          // gemini
+          base.contract_price = price;
+          base.bid_price = Math.max(0.01, price - 0.005);
+          base.ask_price = Math.min(0.99, price + 0.005);
+          base.instrument_symbol = mkt.marketId;
+        }
+        rivers.push(base);
       }
     }
 
     // --- Process each river through downstream nodes ---
+    // Track which markets have already been traded this tick to prevent duplicates
+    // from multiple news articles pointing to the same market.
+    const tradedThisTick = new Set<string>();
+
+    if (t === 0) {
+      console.log(`  [bt debug] Tick 0: ${rivers.length} rivers, ${sourceNodes.length} source nodes, ${articles.length} total articles`);
+      if (rivers.length > 0) console.log(`  [bt debug] First river keys: ${Object.keys(rivers[0]).join(", ")}`);
+    }
+
     for (const river of rivers) {
       const outputMap: Record<string, Record<string, any>> = {};
       outputMap["__source__"] = river;
-      let blocked = false;
+      // Track blocked nodes — only downstream of blocked gates are affected,
+      // not the entire pipeline (matches live executor behavior).
+      const blockedNodes = new Set<string>();
 
       for (const node of downstream) {
-        if (blocked) break;
+        if (blockedNodes.has(node.id)) continue;
 
         // Build river: merge initial + upstream outputs
         const builtRiver: River = { ...river };
         const incoming = strategy.connections.filter((c) => c.target_id === node.id);
+        let nodeUnreachable = false;
         for (const conn of incoming) {
           const src = outputMap[conn.source_id];
           if (!src) continue;
+          // Only check _active_handle on the DIRECT source — don't leak through
           if (src._active_handle && conn.source_handle !== src._active_handle) {
-            blocked = true;
+            nodeUnreachable = true;
             break;
           }
           Object.entries(src).forEach(([k, v]) => { if (!k.startsWith("_")) builtRiver[k] = v; });
           Object.entries(src).forEach(([k, v]) => { if (k.startsWith("_")) builtRiver[k] = v; });
         }
-        if (blocked) break;
+        if (nodeUnreachable) continue;
 
         let outputs: Record<string, any> = {};
 
         // --- Reactive data sources: search markets using upstream context ---
         if (node.category === "data") {
+          if (t <= 1) console.log(`  [bt debug] Tick ${t} reactive ${node.id} (${node.type}): search_terms="${builtRiver.search_terms || ""}" pool_size=${polymarketSearchPool.length}`);
           outputs = await _runReactiveSource(
             node, builtRiver, tickTs, startTs, endTs,
             polymarketSearchPool, geminiSearchPool, historyCache, allMarkets,
           );
+          if (t <= 1) console.log(`  [bt debug] Tick ${t} reactive result: ${outputs._item_count ?? 0} items, event_title="${(outputs.event_title || "").slice(0, 50)}"`);
+
         // --- AI nodes: use cached real Claude calls ---
         } else if (node.category === "ai") {
           switch (node.type) {
@@ -976,7 +1272,7 @@ export async function runBacktest(
             case "ai_estimate": {
               const title = builtRiver.event_title || builtRiver.headline || "";
               const result = title ? await cachedAIEstimate(title) : { ai_probability: null, ai_confidence: "low", ai_reasoning: "No context", key_factors: [] };
-              // Map to analyst_ prefixed fields for ai_analyst
+              if (t <= 1) console.log(`  [bt debug] Tick ${t} ai_analyst ${node.id}: title="${(title || "").slice(0, 50)}" → search_terms="${result.search_terms || ""}" prob=${result.ai_probability}`);
               if (node.type === "ai_analyst") {
                 outputs = {
                   analyst_probability: result.ai_probability,
@@ -1005,8 +1301,13 @@ export async function runBacktest(
               }
               break;
             }
+            case "history_tracker": {
+              // Custom backtest implementation — uses tick timestamp instead of
+              // Date.now() so the time_window config works correctly during replay.
+              outputs = runBacktestHistoryTracker(node, builtRiver, tickTs);
+              break;
+            }
             default: {
-              // For consensus, history_tracker, formula — delegate to real runner
               try {
                 // eslint-disable-next-line @typescript-eslint/no-require-imports
                 const { runAINode: realAIRunner } = require("./node-runners/ai-nodes");
@@ -1020,41 +1321,88 @@ export async function runBacktest(
         } else if (node.category === "logic") {
           outputs = runLogicNode(node, builtRiver);
           if (outputs._gate_result === false) {
-            blocked = true;
-            outputMap[node.id] = outputs;
+            // Block only downstream nodes, not the entire pipeline
+            const q = [node.id];
+            while (q.length) {
+              const id = q.shift()!;
+              for (const c of strategy.connections) {
+                if (c.source_id === id && !blockedNodes.has(c.target_id)) {
+                  blockedNodes.add(c.target_id);
+                  q.push(c.target_id);
+                }
+              }
+            }
+            outputMap[node.id] = { ...builtRiver, ...outputs };
             continue;
           }
         } else if (node.category === "action") {
           const actionResult = runActionNode(node, builtRiver);
           if (actionResult.trade) {
             const tr = actionResult.trade;
-            const entryPrice = builtRiver.price;
-            if (entryPrice != null) {
-              // Find the market for this trade so we can track exit
-              const market = allMarkets.find((m) => m.marketId === tr.marketId);
-              if (market) {
-                openPositions.push({
-                  entryTick: t,
-                  entryTs: tickTs,
-                  entryPrice,
-                  marketId: tr.marketId,
-                  eventTitle: tr.eventTitle,
-                  platform: tr.platform,
-                  direction: tr.direction,
-                  amount: tr.amount,
-                  market,
-                  exitStrategy: tr.exitStrategy,
-                  exitTicks: tr.exitTicks,
-                  takeProfit: tr.takeProfit,
-                  stopLoss: tr.stopLoss,
-                });
-                tradesThisTick++;
+            const currentPrice = builtRiver.yes_price ?? builtRiver.contract_price ?? builtRiver.current_price ?? null;
+            // Dedup: skip if we already traded this market+action this tick.
+            const tradeKey = `${tr.marketId}:${tr.action}`;
+            if (currentPrice != null && !tradedThisTick.has(tradeKey)) {
+              tradedThisTick.add(tradeKey);
+
+              if (tr.action === "sell") {
+                // Close open positions for this market
+                for (let i = openPositions.length - 1; i >= 0; i--) {
+                  const pos = openPositions[i];
+                  if (pos.marketId === tr.marketId) {
+                    const exitPrice = priceAt(pos.market.history, tickTs) ?? currentPrice;
+                    const pnl = pos.direction === "YES"
+                      ? (exitPrice - pos.entryPrice) * pos.amount
+                      : (pos.entryPrice - exitPrice) * pos.amount;
+                    allTrades.push({
+                      tick: t,
+                      timestamp: new Date(tickTs * 1000).toISOString(),
+                      marketId: pos.marketId,
+                      eventTitle: pos.eventTitle,
+                      platform: pos.platform,
+                      direction: pos.direction,
+                      entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
+                      exitPrice: parseFloat(exitPrice.toFixed(4)),
+                      amount: pos.amount,
+                      pnl: parseFloat(pnl.toFixed(2)),
+                      status: "closed",
+                      exitReason: "sell signal (price stalled)",
+                    });
+                    equity += pnl;
+                    openPositions.splice(i, 1);
+                    tradesThisTick++;
+                  }
+                }
+              } else {
+                // Buy — open a new position
+                const market = allMarkets.find((m) => m.marketId === tr.marketId);
+                if (market) {
+                  openPositions.push({
+                    entryTick: t,
+                    entryTs: tickTs,
+                    entryPrice: currentPrice,
+                    marketId: tr.marketId,
+                    eventTitle: tr.eventTitle,
+                    platform: tr.platform,
+                    direction: tr.direction,
+                    amount: tr.amount,
+                    market,
+                    exitStrategy: tr.exitStrategy,
+                    exitTicks: tr.exitTicks,
+                    takeProfit: tr.takeProfit,
+                    stopLoss: tr.stopLoss,
+                  });
+                  tradesThisTick++;
+                }
               }
             }
           }
         }
 
-        outputMap[node.id] = { ...builtRiver, ...outputs };
+        const accumulated = { ...builtRiver, ...outputs };
+        // Don't leak _active_handle through non-router nodes (same fix as live executor)
+        if (!outputs._active_handle) delete accumulated._active_handle;
+        outputMap[node.id] = accumulated;
       }
     }
 

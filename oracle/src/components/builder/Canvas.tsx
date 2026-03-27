@@ -40,7 +40,7 @@ function getNextNodeId() {
 
 const defaultEdgeOptions = {
   animated: true,
-  style: { stroke: "#2A2A3E" },
+  style: { stroke: "#2a2a2e" },
 };
 
 function CanvasInner() {
@@ -272,7 +272,7 @@ function CanvasInner() {
             sourceHandle: prevDef.handles.outputs[0],
             targetHandle: def.handles.inputs[0],
             animated: true,
-            style: { stroke: "#2A2A3E" },
+            style: { stroke: "#2a2a2e" },
           });
         }
 
@@ -407,15 +407,15 @@ function CanvasInner() {
             onInit={setRfInstance}
             nodeTypes={nodeTypeComponents}
             defaultEdgeOptions={defaultEdgeOptions}
-            connectionLineStyle={{ stroke: "#5B7FFF", strokeWidth: 2, strokeDasharray: "6 3" }}
+            connectionLineStyle={{ stroke: "#63636e", strokeWidth: 2, strokeDasharray: "6 3" }}
             fitView
             proOptions={{ hideAttribution: true }}
             className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""}`}
           >
             <MiniMap
-              nodeColor="#252940"
-              maskColor="rgba(8, 9, 14, 0.7)"
-              style={{ backgroundColor: "#0e1018" }}
+              nodeColor="#2a2a2e"
+              maskColor="rgba(9, 9, 11, 0.7)"
+              style={{ backgroundColor: "#111113" }}
             />
             <Background color="rgba(255, 255, 255, 0.03)" gap={24} size={1} />
           </ReactFlow>
@@ -429,15 +429,9 @@ function CanvasInner() {
                 setStrategyName("Untitled Strategy");
                 setStrategyStatus("draft");
               }}
-              className="absolute top-4 right-4 z-20 group flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
+              className="absolute top-4 right-4 z-20 group flex items-center gap-2 px-3 py-2 rounded-xl glass transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
               style={{
-                background:
-                  "linear-gradient(145deg, rgba(14, 16, 24, 0.85) 0%, rgba(20, 22, 32, 0.65) 100%)",
-                backdropFilter: "blur(24px)",
-                WebkitBackdropFilter: "blur(24px)",
-                border: "1px solid rgba(255, 255, 255, 0.06)",
-                boxShadow:
-                  "0 4px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02) inset",
+                boxShadow: "0 4px 20px rgba(0, 0, 0, 0.35)",
               }}
               title="Reset canvas"
             >

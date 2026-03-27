@@ -60,7 +60,7 @@ export function EmptyCanvas({ onLoadTemplate }: EmptyCanvasProps) {
       sourceHandle: c.source_handle,
       targetHandle: c.target_handle,
       animated: true,
-      style: { stroke: "#5a5f7a" },
+      style: { stroke: "#2a2a2e" },
     }));
     onLoadTemplate(nodes, edges, template.name);
   };
@@ -115,7 +115,7 @@ function ChooserView({
           className="group relative text-left rounded-2xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 focus:outline-none"
           style={{
             background:
-              "linear-gradient(145deg, rgba(14, 16, 24, 0.88) 0%, rgba(20, 22, 32, 0.68) 100%)",
+              "linear-gradient(145deg, rgba(17, 17, 19, 0.92) 0%, rgba(22, 22, 24, 0.78) 100%)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
             border: "1px solid rgba(255, 255, 255, 0.05)",
@@ -204,7 +204,7 @@ function ChooserView({
           className="group relative text-left rounded-2xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 focus:outline-none"
           style={{
             background:
-              "linear-gradient(145deg, rgba(14, 16, 24, 0.88) 0%, rgba(20, 22, 32, 0.68) 100%)",
+              "linear-gradient(145deg, rgba(17, 17, 19, 0.92) 0%, rgba(22, 22, 24, 0.78) 100%)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
             border: "1px solid rgba(255, 255, 255, 0.05)",
@@ -375,7 +375,7 @@ function TemplateCard({
       onClick={() => onClick(template)}
       className="group relative text-left w-full rounded-xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:-translate-y-0.5"
       style={{
-        background: `linear-gradient(135deg, rgba(14, 16, 24, 0.85) 0%, rgba(20, 22, 32, 0.65) 100%)`,
+        background: `linear-gradient(135deg, rgba(17, 17, 19, 0.9) 0%, rgba(22, 22, 24, 0.75) 100%)`,
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
         border: `1px solid rgba(255, 255, 255, 0.04)`,
