@@ -482,6 +482,9 @@ function CanvasInner() {
               onStrategyGenerated={handleStrategyGenerated}
               isLoading={aiLoading}
               inputRef={aiPromptRef}
+              existingNodes={nodes}
+              existingEdges={edges}
+              strategyName={strategyName}
             />
           </div>
 
