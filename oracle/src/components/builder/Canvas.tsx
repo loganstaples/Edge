@@ -73,7 +73,7 @@ function CanvasInner() {
     sourceCategory: string;
   } | null>(null);
 
-  const { strategy, isSaving, save, load, deploy, pause } = useStrategy();
+  const { strategy, isSaving, isMinting, save, mintNft, load, deploy, pause, setPublic } = useStrategy();
   const wallet = useWallet();
   const paymentStream = usePaymentStream();
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -125,7 +125,7 @@ function CanvasInner() {
     const id = searchParams.get("id");
     if (id) {
       setStrategyLoading(true);
-      load(id)
+      load(id, wallet.address)
         .then((result) => {
           if (result) {
             setNodes(result.nodes);
@@ -353,9 +353,23 @@ function CanvasInner() {
   }, [nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = useCallback(async () => {
-    const id = await save(strategyName, nodes, edges);
+    if (!wallet.isConnected || !wallet.address) {
+      wallet.connect();
+      return;
+    }
+    const isNew = !strategy?.id;
+    const id = await save(strategyName, nodes, edges, wallet.address);
     window.history.replaceState(null, "", `?id=${id}`);
-  }, [strategyName, nodes, edges, save]);
+
+    // Mint NFT for new strategies
+    if (isNew && wallet.address) {
+      try {
+        await mintNft(id, wallet.address, wallet.signAndSendTransaction);
+      } catch (err: any) {
+        console.warn("NFT minting skipped:", err.message);
+      }
+    }
+  }, [strategyName, nodes, edges, save, mintNft, wallet, strategy?.id]);
 
   const handleDeploy = useCallback(async () => {
     // Show payment modal — user must connect wallet and confirm stream
@@ -370,15 +384,15 @@ function CanvasInner() {
     if (wallet.address && strategy?.id) {
       await paymentStream.startStream(strategy.id, wallet.address, pollingInterval);
     }
-    await deploy();
+    await deploy(wallet.address);
     setStrategyStatus("running");
   }, [deploy, handleSave, wallet.address, strategy?.id, paymentStream, pollingInterval]);
 
   const handlePause = useCallback(async () => {
     await paymentStream.pauseStream();
-    await pause();
+    await pause(wallet.address);
     setStrategyStatus("paused");
-  }, [pause, paymentStream]);
+  }, [pause, paymentStream, wallet.address]);
 
   const handleStop = useCallback(async () => {
     await paymentStream.stopStream();
@@ -493,14 +507,19 @@ function CanvasInner() {
         name={strategyName}
         status={strategyStatus}
         isSaving={isSaving}
+        isMinting={isMinting}
         turboMode={turboMode}
         slowMode={slowMode}
+        isPublic={strategy?.isPublic}
+        nftMint={strategy?.nftMint}
+        ownerWallet={strategy?.ownerWallet}
         onNameChange={setStrategyName}
         onSave={handleSave}
         onDeploy={handleDeploy}
         onPause={handlePause}
         onToggleTurbo={() => { setTurboMode((t) => !t); if (!turboMode) setSlowMode(false); }}
         onToggleSlow={() => { setSlowMode((s) => !s); if (!slowMode) setTurboMode(false); }}
+        onTogglePublic={() => setPublic(!strategy?.isPublic, wallet.address)}
         onStop={handleStop}
         stream={paymentStream.stream}
         walletBalance={wallet.balance}
