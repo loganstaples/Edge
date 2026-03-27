@@ -66,13 +66,12 @@ export function NodePalette() {
         className="flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.97]"
         style={{
           background: open
-            ? "linear-gradient(145deg, rgba(14, 16, 24, 0.85) 0%, rgba(20, 22, 32, 0.65) 100%)"
-            : "linear-gradient(145deg, rgba(14, 16, 24, 0.75) 0%, rgba(20, 22, 32, 0.55) 100%)",
+            ? "rgba(17, 17, 19, 0.9)"
+            : "rgba(17, 17, 19, 0.75)",
           backdropFilter: "blur(24px)",
           WebkitBackdropFilter: "blur(24px)",
           border: "1px solid rgba(255, 255, 255, 0.06)",
-          boxShadow:
-            "0 4px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02) inset",
+          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.35)",
         }}
       >
         <svg
@@ -117,13 +116,11 @@ export function NodePalette() {
         <div
           className="w-64 rounded-2xl overflow-hidden flex flex-col"
           style={{
-            background:
-              "linear-gradient(145deg, rgba(14, 16, 24, 0.85) 0%, rgba(20, 22, 32, 0.65) 100%)",
+            background: "rgba(17, 17, 19, 0.95)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
             border: "1px solid rgba(255, 255, 255, 0.06)",
-            boxShadow:
-              "0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.02) inset, 0 1px 0 rgba(255, 255, 255, 0.04) inset",
+            boxShadow: "0 12px 40px rgba(0, 0, 0, 0.5)",
             maxHeight: "480px",
           }}
         >
@@ -132,7 +129,7 @@ export function NodePalette() {
             className="absolute top-0 left-4 right-4 h-px"
             style={{
               background:
-                "linear-gradient(90deg, transparent, rgba(129, 140, 248, 0.4), rgba(168, 85, 247, 0.3), transparent)",
+                "linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent)",
             }}
           />
 
@@ -245,7 +242,7 @@ export function NodePalette() {
             className="absolute bottom-0 left-0 right-0 h-6 pointer-events-none rounded-b-2xl"
             style={{
               background:
-                "linear-gradient(to top, rgba(14, 16, 24, 0.9), transparent)",
+                "linear-gradient(to top, rgba(17, 17, 19, 0.95), transparent)",
             }}
           />
         </div>

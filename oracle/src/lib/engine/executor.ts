@@ -116,6 +116,13 @@ export async function executeStrategy(strategy: Strategy): Promise<ExecutionResu
         // an AI Analyst survive through intermediate nodes to reach a reactive feed.
         const accumulated = { ...river, ...outputs };
 
+        // _active_handle is router-specific — only keep if THIS node produced it.
+        // Otherwise it leaks through the river and causes isNodeReachable to
+        // incorrectly block nodes >1 hop downstream of a router.
+        if (!outputs._active_handle) {
+          delete accumulated._active_handle;
+        }
+
         // Gate-like nodes: check _gate_result to block downstream
         const isGateNode = outputs._gate_result !== undefined;
         if (isGateNode && outputs._gate_result === false) {
@@ -296,18 +303,10 @@ async function runNode(node: StrategyNode, river: River): Promise<Record<string,
  * This allows patterns like: AI Analyst → (search_terms) → Polymarket Feed
  */
 async function runReactiveDataSource(node: StrategyNode, river: River): Promise<Record<string, any>> {
-  // Override static config with upstream river values
   const dynamicNode = { ...node, config: { ...node.config } };
 
-  // Generic: any river field matching a config key overrides it
-  for (const [key, value] of Object.entries(river)) {
-    if (key.startsWith("_") || value == null) continue;
-    if (key in dynamicNode.config && typeof value === typeof dynamicNode.config[key]) {
-      dynamicNode.config[key] = value;
-    }
-  }
-
-  // Common aliases: upstream nodes can set search_terms/query to drive searches
+  // Only override: upstream search_terms drives reactive data source searches.
+  // No generic config override — only explicit field mappings below.
   const searchTerms = river.search_terms ?? river.search_query ?? river.query ?? null;
   if (typeof searchTerms === "string" && searchTerms.trim()) {
     if (node.type === "polymarket_feed") dynamicNode.config.market_search = searchTerms;

@@ -282,7 +282,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
           className="relative rounded-[14px]"
           style={{
             background:
-              "linear-gradient(135deg, rgba(14, 16, 24, 0.92) 0%, rgba(20, 22, 32, 0.85) 100%)",
+              "linear-gradient(135deg, rgba(17, 17, 19, 0.95) 0%, rgba(22, 22, 24, 0.88) 100%)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
           }}
@@ -315,7 +315,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
                 disabled={isSubmitting}
                 rows={1}
                 className={`w-full bg-transparent text-sm focus:outline-none focus:ring-0 border-none outline-none disabled:opacity-50 resize-none overflow-y-auto transition-colors duration-200 ${isFocused ? "ai-placeholder-bright" : "ai-placeholder-dim"}`}
-                style={{ boxShadow: "none", WebkitAppearance: "none", color: isFocused ? "#ffffff" : "rgba(234, 234, 240, 0.6)" }}
+                style={{ boxShadow: "none", WebkitAppearance: "none", color: isFocused ? "#fafafa" : "rgba(250, 250, 250, 0.5)" }}
               />
             </div>
 
@@ -359,7 +359,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
                     right: menuPos.right,
                     transform: "translateY(-100%)",
                     background:
-                      "linear-gradient(145deg, rgba(14, 16, 24, 0.95) 0%, rgba(20, 22, 32, 0.9) 100%)",
+                      "linear-gradient(145deg, rgba(17, 17, 19, 0.97) 0%, rgba(22, 22, 24, 0.93) 100%)",
                     backdropFilter: "blur(24px)",
                     WebkitBackdropFilter: "blur(24px)",
                     border: "1px solid rgba(255, 255, 255, 0.08)",
@@ -411,7 +411,7 @@ export function AIPromptBar({ onStrategyGenerated, isLoading, inputRef }: AIProm
                         : "rgba(255, 255, 255, 0.06)",
                   color:
                     hasInput && !isSubmitting
-                      ? "#08090e"
+                      ? "#09090b"
                       : isFocused
                         ? "rgba(255, 255, 255, 0.68)"
                         : "rgba(255, 255, 255, 0.25)",

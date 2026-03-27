@@ -78,7 +78,7 @@ function NodeShellComponent({ id: _id, type, selected, status, flash, width = "w
         ${selected ? "ring-2 ring-accent-blue/60 ring-offset-1 ring-offset-edge-bg" : ""}
       `}
       style={{
-        background: `linear-gradient(145deg, rgba(14, 16, 24, 0.9) 0%, rgba(20, 22, 32, 0.7) 100%)`,
+        background: `linear-gradient(145deg, rgba(17, 17, 19, 0.95) 0%, rgba(22, 22, 24, 0.85) 100%)`,
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
         border: flashActive ? `1px solid ${flashColor}` : `1px solid rgba(255, 255, 255, 0.05)`,

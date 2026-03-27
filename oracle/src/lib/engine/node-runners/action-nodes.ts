@@ -73,7 +73,7 @@ function runTradeAdvanced(node: StrategyNode, river: River): Record<string, any>
   }
   const state = positionState[node.id];
 
-  const currentPrice = river.price ?? river.contract_price ?? river.yes_price ?? 0.5;
+  const currentPrice = river.yes_price ?? river.contract_price ?? river.current_price ?? 0.5;
   const baseSize = river.ec_suggested_size ?? river.suggested_size ?? node.config.max_position ?? 25;
   const side = direction === "buy_no" ? "NO" : "YES";
   const currentEdge = river.ec_edge_pct ?? river.ec_edge ?? river.edge ?? 0;
@@ -148,8 +148,8 @@ function runAlertAdvanced(node: StrategyNode, river: River): Record<string, any>
     edge_value: river.ec_edge_pct != null ? `${river.ec_edge_pct}%` : "N/A",
     probability: river.analyst_probability != null ? `${(river.analyst_probability * 100).toFixed(0)}%` : "N/A",
     confidence: river.analyst_confidence || "N/A",
-    price: (river.price ?? river.contract_price ?? river.yes_price ?? river.current_price) != null
-      ? `${((river.price ?? river.contract_price ?? river.yes_price ?? river.current_price) * 100).toFixed(0)}¢`
+    price: (river.yes_price ?? river.contract_price ?? river.current_price) != null
+      ? `${((river.yes_price ?? river.contract_price ?? river.current_price) * 100).toFixed(0)}¢`
       : "N/A",
     direction: river.ec_direction || river.analyst_direction || river.direction || "N/A",
     reasoning: river.analyst_reasoning || "",

@@ -72,7 +72,7 @@ function evaluateCondition(condition: Condition, river: River): boolean {
 
 function runEdgeCalculator(node: StrategyNode, river: River): Record<string, any> {
   const probability = river.analyst_probability ?? river.consensus_probability ?? null;
-  const marketPrice = river.price ?? river.contract_price ?? river.yes_price ?? river.current_price ?? null;
+  const marketPrice = river.yes_price ?? river.contract_price ?? river.current_price ?? null;
 
   if (probability == null || marketPrice == null) {
     return {
@@ -89,18 +89,12 @@ function runEdgeCalculator(node: StrategyNode, river: River): Record<string, any
 
   const rawEdge = probability - marketPrice;
 
-  // Source quality weight
-  const confidence = river.analyst_confidence ?? "medium";
-  const depth = river._analyst_depth ?? "balanced";
-  const sourceTier = river.source_tier ?? 2;
-  let sourceWeight = 0.7;
-  if (confidence === "high" || confidence === "very_high") sourceWeight += 0.15;
-  if (confidence === "low") sourceWeight -= 0.15;
-  if (depth === "thorough") sourceWeight += 0.1;
-  if (depth === "fast") sourceWeight -= 0.1;
-  if (sourceTier === 1) sourceWeight += 0.05;
-  if (sourceTier === 3) sourceWeight -= 0.1;
-  sourceWeight = Math.max(0.3, Math.min(1.0, sourceWeight));
+  // Source quality weight — based solely on analyst_confidence (always present)
+  const confidence = river.analyst_confidence ?? river.consensus_confidence ?? "medium";
+  const CONFIDENCE_WEIGHTS: Record<string, number> = {
+    low: 0.5, medium: 0.7, high: 0.85, very_high: 0.95,
+  };
+  const sourceWeight = CONFIDENCE_WEIGHTS[confidence] ?? 0.7;
 
   // Temporal decay
   const newsAgeMinutes = river.published_at
@@ -183,9 +177,9 @@ function runArbDetector(node: StrategyNode, river: River): Record<string, any> {
     price1 = river.current_price;
     platform1 = river.platform ?? "exchange";
   }
-  if (price2 == null && price1 != null && river.price != null && river.price !== price1) {
-    price2 = river.price;
-    platform2 = river.platform ?? "platform_2";
+  if (price2 == null && price1 != null && river.current_price != null && river.current_price !== price1) {
+    price2 = river.current_price;
+    platform2 = river.platform ?? "exchange";
   }
   // If we only found one price, swap so price1 is always populated
   if (price1 == null && price2 != null) {
@@ -291,7 +285,7 @@ function runRouter(node: StrategyNode, river: River): Record<string, any> {
 const priceAlertState: Record<string, { crossedAt: number; lastPrice: number }> = {};
 
 function runPriceAlertDecide(node: StrategyNode, river: River): Record<string, any> {
-  const currentPrice = river.price ?? river.contract_price ?? river.yes_price ?? river.current_price ?? null;
+  const currentPrice = river.yes_price ?? river.contract_price ?? river.current_price ?? null;
   if (currentPrice == null) {
     return { pa_triggered: false, pa_current_price: null, pa_direction: null, pa_cross_time: null, _gate_result: false, _gate_details: "No price data" };
   }
