@@ -18,7 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { useSearchParams } from "next/navigation";
 
 import { nodeTypeComponents } from "./nodes";
-import { NODE_TYPES } from "@/lib/strategy/node-types";
+import { NODE_TYPES, type NodeTypeDefinition } from "@/lib/strategy/node-types";
 import { NodePalette } from "./NodePalette";
 import { StrategyToolbar } from "./StrategyToolbar";
 import { AIPromptBar } from "./AIPromptBar";
@@ -58,6 +58,10 @@ function CanvasInner() {
   const [strategyLoading, setStrategyLoading] = useState(false);
   const [turboMode, setTurboMode] = useState(false);
   const [slowMode, setSlowMode] = useState(false);
+  const [isStreamingIn, setIsStreamingIn] = useState(false);
+  const [streamingSettle, setStreamingSettle] = useState(false);
+  const isStreamingRef = useRef(false);
+  const streamCategoryCountRef = useRef<Record<string, number>>({});
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const aiPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -381,6 +385,51 @@ function CanvasInner() {
     setStrategyStatus("stopped");
   }, [paymentStream]);
 
+  // --- Streaming: clear canvas and prepare for incremental node rendering ---
+  const handleStreamStart = useCallback(() => {
+    setIsStreamingIn(true);
+    isStreamingRef.current = true;
+    streamCategoryCountRef.current = {};
+    setNodes([]);
+    setEdges([]);
+  }, [setNodes, setEdges]);
+
+  // --- Streaming: add newly parsed nodes with entrance animation ---
+  const CATEGORY_COL: Record<string, number> = { data: 0, ai: 1, logic: 2, action: 3 };
+
+  const handleStreamingNodes = useCallback(
+    (rawNodes: any[]) => {
+      const nodesToAdd: Node[] = rawNodes.map((n: any) => {
+        const def = NODE_TYPES[n.type] as NodeTypeDefinition | undefined;
+        const cat = def?.category ?? n.category ?? "data";
+        const col = CATEGORY_COL[cat] ?? 0;
+        const row = streamCategoryCountRef.current[cat] ?? 0;
+        streamCategoryCountRef.current[cat] = row + 1;
+
+        return {
+          id: n.id,
+          type: n.type,
+          position: { x: col * 350, y: row * 220 },
+          className: "streaming-node-enter",
+          data: { config: n.config ?? {} },
+        };
+      });
+
+      setNodes((nds) => [...nds, ...nodesToAdd]);
+
+      // Remove entrance class after animation completes
+      const ids = new Set(nodesToAdd.map((n) => n.id));
+      setTimeout(() => {
+        setNodes((nds) =>
+          nds.map((n) =>
+            ids.has(n.id) ? { ...n, className: undefined } : n
+          )
+        );
+      }, 600);
+    },
+    [setNodes]
+  );
+
   const handleStrategyGenerated = useCallback(
     (generatedNodes: any[], connections: any[], name?: string) => {
       const newNodes: Node[] = generatedNodes.map((n: any) => ({
@@ -399,11 +448,34 @@ function CanvasInner() {
         ...defaultEdgeOptions,
       }));
 
-      setNodes(newNodes);
-      setEdges(newEdges);
+      if (isStreamingRef.current) {
+        // Animate nodes to their final auto-layout positions
+        setStreamingSettle(true);
+        setNodes(newNodes);
+
+        // Fade in edges after positions start settling
+        setTimeout(() => {
+          setEdges(newEdges);
+        }, 350);
+
+        // Fit view and clean up streaming state
+        setTimeout(() => {
+          rfInstance?.fitView({ padding: 0.15, duration: 400 });
+        }, 500);
+
+        setTimeout(() => {
+          setStreamingSettle(false);
+          setIsStreamingIn(false);
+          isStreamingRef.current = false;
+        }, 900);
+      } else {
+        setNodes(newNodes);
+        setEdges(newEdges);
+      }
+
       if (name) setStrategyName(name);
     },
-    [setNodes, setEdges]
+    [setNodes, setEdges, rfInstance]
   );
 
   const handleLoadTemplate = useCallback(
@@ -471,7 +543,7 @@ function CanvasInner() {
             connectionLineStyle={{ stroke: "#9b9bb0", strokeWidth: 2, strokeDasharray: "6 3" }}
             fitView
             proOptions={{ hideAttribution: true }}
-            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""}`}
+            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""} ${streamingSettle ? "streaming-settle" : ""} ${isStreamingIn && !streamingSettle ? "streaming-edges-enter" : ""}`}
           >
             <MiniMap
               nodeColor="#2a2a2e"
@@ -520,6 +592,8 @@ function CanvasInner() {
           <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20">
             <AIPromptBar
               onStrategyGenerated={handleStrategyGenerated}
+              onStreamStart={handleStreamStart}
+              onStreamingNodes={handleStreamingNodes}
               isLoading={aiLoading}
               inputRef={aiPromptRef}
               existingNodes={nodes}
