@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --edge-bg: #08090e;
+  --edge-surface: #0e1018;
+  --edge-border: #1a1d2e;
+}
+
+body {
+  background-color: var(--edge-bg);
+  color: #eaeaf0;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Glass morphism utilities */
+@layer utilities {
+  .glass {
+    background: rgba(14, 16, 24, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .glass-hover {
+    background: rgba(20, 22, 32, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .glass-card {
+    background: linear-gradient(
+      135deg,
+      rgba(14, 16, 24, 0.8) 0%,
+      rgba(20, 22, 32, 0.6) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .gradient-edge {
+    position: relative;
+  }
+
+  .gradient-edge::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(129, 140, 248, 0.3),
+      transparent
+    );
+  }
+}
+
+/* Smooth scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(129, 140, 248, 0.3);
+  color: #eaeaf0;
+}
+
+/* Smooth transitions for all interactive elements */
+button,
+a,
+input,
+select {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+input:focus,
+select:focus {
+  outline: none;
+}
+
+/* Font variant for tabular numbers */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Override ReactFlow grab cursor when empty canvas overlay is visible */
+.react-flow-default-cursor .react-flow__pane {
+  cursor: default !important;
+}
+
+/* AI prompt bar placeholder states */
+.ai-placeholder-dim::placeholder {
+  color: rgba(90, 95, 122, 0.7);
+  transition: color 0.2s ease;
+}
+.ai-placeholder-bright::placeholder {
+  color: rgba(255, 255, 255, 0.68);
+  transition: color 0.2s ease;
+}
+

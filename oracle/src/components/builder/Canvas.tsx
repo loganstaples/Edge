@@ -1,0 +1,493 @@
+"use client";
+
+import { useCallback, useState, useRef, useEffect, Suspense, DragEvent } from "react";
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  MiniMap,
+  Background,
+  addEdge,
+  useNodesState,
+  useEdgesState,
+  type Connection,
+  type Node,
+  type Edge,
+  type ReactFlowInstance,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { useSearchParams } from "next/navigation";
+
+import { nodeTypeComponents } from "./nodes";
+import { NODE_TYPES } from "@/lib/strategy/node-types";
+import { NodePalette } from "./NodePalette";
+import { StrategyToolbar } from "./StrategyToolbar";
+import { AIPromptBar } from "./AIPromptBar";
+import { EmptyCanvas } from "./EmptyCanvas";
+import { DragFromPortMenu } from "./DragFromPortMenu";
+import { useStrategy } from "@/hooks/useStrategy";
+import { useStrategyExecution } from "@/hooks/useStrategyExecution";
+import { MiniActivityFeed } from "./MiniActivityFeed";
+
+type StrategyStatus = "draft" | "running" | "paused" | "stopped";
+
+const AUTO_CONNECT_THRESHOLD = 80;
+
+let nodeIdCounter = 0;
+function getNextNodeId() {
+  nodeIdCounter += 1;
+  return `node_${Date.now()}_${nodeIdCounter}`;
+}
+
+const defaultEdgeOptions = {
+  animated: true,
+  style: { stroke: "#2A2A3E" },
+};
+
+function CanvasInner() {
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [strategyName, setStrategyName] = useState("Untitled Strategy");
+  const [strategyStatus, setStrategyStatus] = useState<StrategyStatus>("draft");
+  const [aiLoading] = useState(false);
+  const [strategyLoading, setStrategyLoading] = useState(false);
+  const [turboMode, setTurboMode] = useState(false);
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+  const aiPromptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Drag-from-port menu state
+  const [portMenu, setPortMenu] = useState<{
+    position: { x: number; y: number };
+    sourceNodeId: string;
+    sourceCategory: string;
+  } | null>(null);
+
+  const { strategy, isSaving, save, load, deploy, pause } = useStrategy();
+  const searchParams = useSearchParams();
+
+  const pollingInterval = turboMode ? 5000 : 30000;
+  const { logs, isExecuting, totalPnl, nodeStatuses } = useStrategyExecution(
+    strategy?.id ?? null,
+    strategyStatus,
+    pollingInterval
+  );
+
+  // Apply node statuses from execution ticks
+  useEffect(() => {
+    if (!nodeStatuses || Object.keys(nodeStatuses).length === 0) return;
+    setNodes((nds) =>
+      nds.map((n) => ({
+        ...n,
+        data: { ...n.data, status: nodeStatuses[n.id] || "idle" },
+      }))
+    );
+  }, [nodeStatuses, setNodes]);
+
+  // Load strategy from URL param on mount
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) {
+      setStrategyLoading(true);
+      load(id)
+        .then((result) => {
+          if (result) {
+            setNodes(result.nodes);
+            setEdges(result.edges);
+            setStrategyName(result.name);
+            setStrategyStatus(result.status as StrategyStatus);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setStrategyLoading(false));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      setEdges((eds) => addEdge({ ...connection, ...defaultEdgeOptions }, eds));
+    },
+    [setEdges]
+  );
+
+  // Auto-connect: when a node is dropped near another node's output port
+  const tryAutoConnect = useCallback(
+    (newNodeId: string, newNodePosition: { x: number; y: number }) => {
+      const newNodeDef = nodes.find((n) => n.id === newNodeId);
+      if (!newNodeDef?.type) return;
+      const def = NODE_TYPES[newNodeDef.type];
+      if (!def || def.handles.inputs.length === 0) return;
+
+      for (const existingNode of nodes) {
+        if (existingNode.id === newNodeId) continue;
+        const existingDef = NODE_TYPES[existingNode.type as string];
+        if (!existingDef || existingDef.handles.outputs.length === 0) continue;
+
+        // Check distance from existing node's right side to new node's left side
+        const existingRight = existingNode.position.x + 220; // approximate node width
+        const dx = Math.abs(newNodePosition.x - existingRight);
+        const dy = Math.abs(newNodePosition.y - existingNode.position.y);
+
+        if (dx < AUTO_CONNECT_THRESHOLD && dy < AUTO_CONNECT_THRESHOLD) {
+          // Auto-connect
+          const sourceHandle = existingDef.handles.outputs[0];
+          const targetHandle = def.handles.inputs[0];
+          setEdges((eds) =>
+            addEdge(
+              {
+                id: `auto_${existingNode.id}_${newNodeId}`,
+                source: existingNode.id,
+                target: newNodeId,
+                sourceHandle,
+                targetHandle,
+                ...defaultEdgeOptions,
+              },
+              eds
+            )
+          );
+          return; // Only auto-connect to one node
+        }
+      }
+    },
+    [nodes, setEdges]
+  );
+
+  const onDragOver = useCallback((event: DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const onDrop = useCallback(
+    (event: DragEvent) => {
+      event.preventDefault();
+      const nodeType = event.dataTransfer.getData("application/reactflow-type");
+      if (!nodeType || !NODE_TYPES[nodeType]) return;
+
+      const def = NODE_TYPES[nodeType];
+      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
+      if (!bounds || !rfInstance) return;
+
+      const position = rfInstance.screenToFlowPosition({
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+      });
+
+      const newId = getNextNodeId();
+      const newNode: Node = {
+        id: newId,
+        type: nodeType,
+        position,
+        data: { config: { ...def.defaultConfig } },
+      };
+
+      setNodes((nds) => [...nds, newNode]);
+
+      // Try auto-connect after a tick (so the node is in the array)
+      setTimeout(() => tryAutoConnect(newId, position), 0);
+    },
+    [rfInstance, setNodes, tryAutoConnect]
+  );
+
+  // Drag-from-port: when user drags from output into empty space
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement;
+      // If the connection was completed (landed on a handle), don't show menu
+      if (target.classList.contains("react-flow__handle")) return;
+
+      // Find which node the drag started from
+      // React Flow 12 uses .connecting or .connectingfrom — try both
+      const sourceHandle = document.querySelector(".react-flow__handle.connectingfrom") || document.querySelector(".react-flow__handle.connecting");
+      if (!sourceHandle) return;
+
+      const sourceNodeEl = sourceHandle.closest(".react-flow__node");
+      if (!sourceNodeEl) return;
+
+      const sourceNodeId = sourceNodeEl.getAttribute("data-id");
+      if (!sourceNodeId) return;
+
+      const sourceNode = nodes.find((n) => n.id === sourceNodeId);
+      if (!sourceNode?.type) return;
+
+      const sourceDef = NODE_TYPES[sourceNode.type];
+      if (!sourceDef) return;
+
+      const clientX = "clientX" in event ? event.clientX : event.touches?.[0]?.clientX ?? 0;
+      const clientY = "clientY" in event ? event.clientY : event.touches?.[0]?.clientY ?? 0;
+
+      setPortMenu({
+        position: { x: clientX, y: clientY },
+        sourceNodeId,
+        sourceCategory: sourceDef.category,
+      });
+    },
+    [nodes]
+  );
+
+  const handlePortMenuSelect = useCallback(
+    (nodeTypes: string[]) => {
+      if (!portMenu || !rfInstance) return;
+
+      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
+      if (!bounds) return;
+
+      const basePosition = rfInstance.screenToFlowPosition({
+        x: portMenu.position.x - bounds.left,
+        y: portMenu.position.y - bounds.top,
+      });
+
+      let prevId = portMenu.sourceNodeId;
+      const newNodes: Node[] = [];
+      const newEdges: Edge[] = [];
+
+      nodeTypes.forEach((nodeType, i) => {
+        const def = NODE_TYPES[nodeType];
+        if (!def) return;
+
+        const newId = getNextNodeId();
+        const position = { x: basePosition.x + i * 250, y: basePosition.y };
+
+        newNodes.push({
+          id: newId,
+          type: nodeType,
+          position,
+          data: { config: { ...def.defaultConfig } },
+        });
+
+        // Connect to previous node
+        const prevDef = i === 0
+          ? NODE_TYPES[nodes.find((n) => n.id === prevId)?.type as string]
+          : NODE_TYPES[nodeTypes[i - 1]];
+
+        if (prevDef) {
+          newEdges.push({
+            id: `port_${prevId}_${newId}`,
+            source: prevId,
+            target: newId,
+            sourceHandle: prevDef.handles.outputs[0],
+            targetHandle: def.handles.inputs[0],
+            animated: true,
+            style: { stroke: "#2A2A3E" },
+          });
+        }
+
+        prevId = newId;
+      });
+
+      setNodes((nds) => [...nds, ...newNodes]);
+      setEdges((eds) => [...eds, ...newEdges]);
+      setPortMenu(null);
+    },
+    [portMenu, rfInstance, nodes, setNodes, setEdges]
+  );
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        aiPromptRef.current?.focus();
+      }
+      if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleSave();
+      }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleDeploy();
+      }
+      if (e.key === "d" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        // Duplicate selected nodes
+        const selected = nodes.filter((n) => n.selected);
+        if (selected.length === 0) return;
+        const newNodes = selected.map((n) => ({
+          ...n,
+          id: getNextNodeId(),
+          position: { x: n.position.x + 30, y: n.position.y + 30 },
+          selected: false,
+        }));
+        setNodes((nds) => [...nds, ...newNodes]);
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [nodes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = useCallback(async () => {
+    const id = await save(strategyName, nodes, edges);
+    window.history.replaceState(null, "", `?id=${id}`);
+  }, [strategyName, nodes, edges, save]);
+
+  const handleDeploy = useCallback(async () => {
+    // Auto-save before deploying so strategy.id is set
+    await handleSave();
+    await deploy();
+    setStrategyStatus("running");
+  }, [deploy, handleSave]);
+
+  const handlePause = useCallback(async () => {
+    await pause();
+    setStrategyStatus("paused");
+  }, [pause]);
+
+  const handleStrategyGenerated = useCallback(
+    (generatedNodes: any[], connections: any[]) => {
+      const newNodes: Node[] = generatedNodes.map((n: any) => ({
+        id: n.id,
+        type: n.type,
+        position: n.position ?? { x: 0, y: 0 },
+        data: { config: n.config ?? {} },
+      }));
+
+      const newEdges: Edge[] = connections.map((c: any, i: number) => ({
+        id: `edge_gen_${i}`,
+        source: c.source_id,
+        target: c.target_id,
+        sourceHandle: c.source_handle,
+        targetHandle: c.target_handle,
+        ...defaultEdgeOptions,
+      }));
+
+      setNodes(newNodes);
+      setEdges(newEdges);
+    },
+    [setNodes, setEdges]
+  );
+
+  const handleLoadTemplate = useCallback(
+    (templateNodes: Node[], templateEdges: Edge[], name: string) => {
+      setNodes(templateNodes);
+      setEdges(templateEdges);
+      setStrategyName(name);
+    },
+    [setNodes, setEdges]
+  );
+
+  return (
+    <div className="h-screen flex flex-col bg-edge-bg">
+      <StrategyToolbar
+        name={strategyName}
+        status={strategyStatus}
+        isSaving={isSaving}
+        turboMode={turboMode}
+        onNameChange={setStrategyName}
+        onSave={handleSave}
+        onDeploy={handleDeploy}
+        onPause={handlePause}
+        onToggleTurbo={() => setTurboMode((t) => !t)}
+      />
+      <div className="flex-1 min-h-0 min-w-0 relative" ref={reactFlowWrapper}>
+        <NodePalette />
+          {strategyLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-edge-bg/80">
+              <p className="text-edge-muted text-sm animate-pulse-soft">Loading strategy...</p>
+            </div>
+          )}
+          {!strategyLoading && nodes.length === 0 && (
+            <EmptyCanvas onLoadTemplate={handleLoadTemplate} />
+          )}
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onConnectEnd={onConnectEnd}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onInit={setRfInstance}
+            nodeTypes={nodeTypeComponents}
+            defaultEdgeOptions={defaultEdgeOptions}
+            connectionLineStyle={{ stroke: "#5B7FFF", strokeWidth: 2, strokeDasharray: "6 3" }}
+            fitView
+            proOptions={{ hideAttribution: true }}
+            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""}`}
+          >
+            <MiniMap
+              nodeColor="#252940"
+              maskColor="rgba(8, 9, 14, 0.7)"
+              style={{ backgroundColor: "#0e1018" }}
+            />
+            <Background color="rgba(255, 255, 255, 0.03)" gap={24} size={1} />
+          </ReactFlow>
+
+          {/* Reset canvas button — top-right, only when nodes exist */}
+          {nodes.length > 0 && (
+            <button
+              onClick={() => {
+                setNodes([]);
+                setEdges([]);
+                setStrategyName("Untitled Strategy");
+                setStrategyStatus("draft");
+              }}
+              className="absolute top-4 right-4 z-20 group flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
+              style={{
+                background:
+                  "linear-gradient(145deg, rgba(14, 16, 24, 0.85) 0%, rgba(20, 22, 32, 0.65) 100%)",
+                backdropFilter: "blur(24px)",
+                WebkitBackdropFilter: "blur(24px)",
+                border: "1px solid rgba(255, 255, 255, 0.06)",
+                boxShadow:
+                  "0 4px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02) inset",
+              }}
+              title="Reset canvas"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-edge-muted group-hover:text-edge-text transition-colors duration-200"
+              >
+                <polyline points="1 4 1 10 7 10" />
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+              <span className="text-[11px] font-medium text-edge-muted group-hover:text-edge-text transition-colors duration-200">
+                Reset
+              </span>
+            </button>
+          )}
+
+          {/* AI Prompt — floating at bottom center */}
+          <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20">
+            <AIPromptBar
+              onStrategyGenerated={handleStrategyGenerated}
+              isLoading={aiLoading}
+              inputRef={aiPromptRef}
+            />
+          </div>
+
+          {/* Drag-from-port menu */}
+          {portMenu && (
+            <DragFromPortMenu
+              position={portMenu.position}
+              sourceCategory={portMenu.sourceCategory}
+              onSelect={handlePortMenuSelect}
+              onClose={() => setPortMenu(null)}
+            />
+          )}
+      </div>
+      <MiniActivityFeed
+        logs={logs}
+        isExecuting={isExecuting}
+        totalPnl={totalPnl}
+      />
+    </div>
+  );
+}
+
+export default function Canvas() {
+  return (
+    <ReactFlowProvider>
+      <Suspense>
+        <CanvasInner />
+      </Suspense>
+    </ReactFlowProvider>
+  );
+}

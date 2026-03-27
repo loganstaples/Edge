@@ -1,0 +1,28 @@
+import type { Metadata } from "next";
+import "./globals.css";
+export const metadata: Metadata = {
+  title: "EDGE — Prediction Market Strategy Builder",
+  description: "Build, deploy, and share autonomous prediction market trading strategies.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className="dark">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="antialiased min-h-screen bg-edge-bg text-edge-text">
+        <div className="fixed inset-0 bg-twilight-gradient pointer-events-none" />
+        <div className="fixed inset-0 bg-twilight-subtle pointer-events-none" />
+        <div className="relative z-10">
+          {children}
+        </div>
+      </body>
+    </html>
+  );
+}
