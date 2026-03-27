@@ -19,7 +19,7 @@ function TradeAdvancedNodeComponent({ id, type, data, selected }: any) {
   }, [recentTrades]);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} flash={flash} width="w-[260px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} flash={flash} width="w-[260px]">
       <div className="space-y-1.5">
         <div className="flex gap-1.5">
           <div className="flex-1">

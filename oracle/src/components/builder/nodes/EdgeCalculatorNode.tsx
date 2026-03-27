@@ -10,7 +10,7 @@ function EdgeCalculatorNodeComponent({ id, type, data, selected }: any) {
   const aboveThreshold = edgePct != null && Math.abs(edgePct) >= (config.min_edge ?? 5);
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width="w-[240px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width="w-[240px]">
       <div className="space-y-1.5">
         <div className="flex gap-1.5">
           <div className="flex-1">

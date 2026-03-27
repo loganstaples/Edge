@@ -17,7 +17,7 @@ function AlertAdvancedNodeComponent({ id, type, data, selected }: any) {
   };
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width={expanded ? "w-[300px]" : "w-[240px]"}>
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width={expanded ? "w-[300px]" : "w-[240px]"}>
       <div className="space-y-1.5">
         {/* Channel toggles */}
         <div>

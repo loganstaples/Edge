@@ -8,7 +8,7 @@ function ArbitrageDetectorNodeComponent({ id, type, data, selected }: any) {
   const lastOutput = data?.lastOutput;
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width="w-[250px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width="w-[250px]">
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Event Matching</label>

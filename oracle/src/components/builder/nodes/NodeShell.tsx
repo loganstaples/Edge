@@ -37,6 +37,7 @@ interface NodeShellProps {
   selected?: boolean;
   status?: NodeStatus;
   flash?: "buy" | "sell" | null; // Triggers green/red flash animation
+  isActive?: boolean; // True when node is currently executing (border glows with category color)
   width?: string; // e.g. "w-[220px]"
   children: ReactNode;
 }
@@ -49,7 +50,7 @@ const STATUS_COLORS: Record<NodeStatus, string> = {
   warning: "bg-accent-amber",
 };
 
-function NodeShellComponent({ id: _id, type, selected, status, flash, width = "w-[220px]", children }: NodeShellProps) {
+function NodeShellComponent({ id: _id, type, selected, status, flash, isActive, width = "w-[220px]", children }: NodeShellProps) {
   // Hooks must be called unconditionally before any early returns
   const [flashActive, setFlashActive] = useState<"buy" | "sell" | null>(null);
   const prevFlashRef = useRef(flash);
@@ -81,13 +82,19 @@ function NodeShellComponent({ id: _id, type, selected, status, flash, width = "w
         background: `linear-gradient(145deg, rgba(10, 10, 12, 0.97) 0%, rgba(14, 14, 16, 0.95) 100%)`,
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
-        border: flashActive ? `1.5px solid ${flashColor}` : `1.5px solid rgba(255, 255, 255, 0.13)`,
+        border: flashActive
+          ? `1.5px solid ${flashColor}`
+          : isActive
+            ? `1.5px solid ${categoryColor}90`
+            : `1.5px solid rgba(255, 255, 255, 0.13)`,
         boxShadow: flashActive
           ? flashShadow
-          : selected
-            ? `0 0 20px rgba(255,255,255,0.06), 0 4px 16px rgba(0,0,0,0.4)`
-            : `0 2px 12px rgba(0,0,0,0.35)`,
-        transition: "box-shadow 0.3s ease, border-color 0.3s ease",
+          : isActive
+            ? `0 0 20px ${categoryColor}30, 0 0 40px ${categoryColor}15, 0 4px 16px rgba(0,0,0,0.3)`
+            : selected
+              ? `0 0 20px rgba(255,255,255,0.06), 0 4px 16px rgba(0,0,0,0.4)`
+              : `0 2px 12px rgba(0,0,0,0.35)`,
+        transition: "box-shadow 0.4s ease, border-color 0.4s ease",
       }}
     >
       {/* Inner wrapper clips decorative content but handles remain unclipped */}

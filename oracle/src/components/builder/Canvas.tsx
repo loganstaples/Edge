@@ -24,6 +24,7 @@ import { StrategyToolbar } from "./StrategyToolbar";
 import { AIPromptBar } from "./AIPromptBar";
 import { EmptyCanvas } from "./EmptyCanvas";
 import { DragFromPortMenu } from "./DragFromPortMenu";
+import { LiveStatsBar } from "./LiveStatsBar";
 import { useStrategy } from "@/hooks/useStrategy";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
 import { MiniActivityFeed } from "./MiniActivityFeed";
@@ -66,17 +67,18 @@ function CanvasInner() {
   const searchParams = useSearchParams();
 
   const pollingInterval = turboMode ? 5000 : 30000;
-  const { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs } = useStrategyExecution(
+  const { logs, isExecuting, totalPnl, nodeStatuses, nodeOutputs, activeNodeIds, equityHistory, liveStats } = useStrategyExecution(
     strategy?.id ?? null,
     strategyStatus,
     pollingInterval
   );
 
-  // Apply node statuses and outputs from execution ticks
+  // Apply node statuses, outputs, and active state from execution ticks
   useEffect(() => {
     const hasStatuses = nodeStatuses && Object.keys(nodeStatuses).length > 0;
     const hasOutputs = nodeOutputs && Object.keys(nodeOutputs).length > 0;
-    if (!hasStatuses && !hasOutputs) return;
+    const hasActive = activeNodeIds.size > 0;
+    if (!hasStatuses && !hasOutputs && !hasActive) return;
     setNodes((nds) =>
       nds.map((n) => ({
         ...n,
@@ -84,10 +86,11 @@ function CanvasInner() {
           ...n.data,
           ...(hasStatuses ? { status: nodeStatuses[n.id] || "idle" } : {}),
           ...(hasOutputs && nodeOutputs[n.id] ? { lastOutput: nodeOutputs[n.id] } : {}),
+          isActive: activeNodeIds.has(n.id),
         },
       }))
     );
-  }, [nodeStatuses, nodeOutputs, setNodes]);
+  }, [nodeStatuses, nodeOutputs, activeNodeIds, setNodes]);
 
   // Load strategy from URL param on mount
   useEffect(() => {
@@ -385,6 +388,15 @@ function CanvasInner() {
         onPause={handlePause}
         onToggleTurbo={() => setTurboMode((t) => !t)}
       />
+      {/* Live stats bar — visible when strategy is running */}
+      {(strategyStatus === "running" || strategyStatus === "paused") && liveStats.tickCount > 0 && (
+        <LiveStatsBar
+          stats={liveStats}
+          equityHistory={equityHistory}
+          isExecuting={isExecuting}
+        />
+      )}
+
       <div className="flex-1 min-h-0 min-w-0 relative" ref={reactFlowWrapper}>
         <NodePalette />
           {strategyLoading && (

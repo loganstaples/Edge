@@ -9,7 +9,7 @@ function HistoryTrackerNodeComponent({ id, type, data, selected }: any) {
   const history = lastOutput?.history_values ?? [];
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status}>
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive}>
       <div className="space-y-1.5">
         <div>
           <label className={labelClass}>Track Field</label>

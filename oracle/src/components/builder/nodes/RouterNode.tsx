@@ -47,7 +47,7 @@ function RouterNodeComponent({ id, type, data, selected }: any) {
   };
 
   return (
-    <NodeShell id={id} type={type} selected={selected} status={data?.status} width="w-[260px]">
+    <NodeShell id={id} type={type} selected={selected} status={data?.status} isActive={data?.isActive} width="w-[260px]">
       <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
         {routes.map((route: Route, i: number) => (
           <div key={i} className="space-y-0.5">
