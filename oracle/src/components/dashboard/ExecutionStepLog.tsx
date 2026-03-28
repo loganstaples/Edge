@@ -64,13 +64,13 @@ export function ExecutionStepLog({ entries, isStreaming }: Props) {
           >
             {/* Header: timestamp + tick */}
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-mono text-edge-dim">
-                [{new Date(entry.timestamp).toLocaleString("en-US", {
+              <span className="text-xs font-medium text-edge-muted">
+                {new Date(entry.timestamp).toLocaleString("en-US", {
                   year: "numeric", month: "2-digit", day: "2-digit",
                   hour: "2-digit", minute: "2-digit", second: "2-digit",
-                })}]
+                })}
               </span>
-              <span className="text-[10px] font-semibold text-edge-muted uppercase tracking-wider">
+              <span className="text-xs font-semibold text-edge-text">
                 Tick {entry.tick + 1}
               </span>
               {/* Status dot */}
@@ -84,7 +84,7 @@ export function ExecutionStepLog({ entries, isStreaming }: Props) {
             </div>
 
             {narr ? (
-              <div className="space-y-0.5 text-[11px] font-mono leading-[1.6]">
+              <div className="space-y-1 text-xs leading-relaxed text-edge-text-2">
                 {/* News / Event */}
                 {(narr.headline || narr.eventTitle) && (
                   <div>
@@ -123,7 +123,7 @@ export function ExecutionStepLog({ entries, isStreaming }: Props) {
                         <span className={
                           narr.aiDirection === "bullish" ? "text-accent-green"
                             : narr.aiDirection === "bearish" ? "text-accent-red"
-                            : "text-edge-text"
+                              : "text-edge-text"
                         }>
                           {narr.aiDirection.charAt(0).toUpperCase() + narr.aiDirection.slice(1)}
                         </span>
@@ -182,6 +182,14 @@ export function ExecutionStepLog({ entries, isStreaming }: Props) {
                       <span className="text-accent-green font-semibold">
                         {narr.tradeAction} {narr.tradeAmount?.toFixed(0)} {narr.tradeDirection} @ ${narr.tradePrice?.toFixed(2)}
                       </span>
+                      {narr.eventTitle && (
+                        <span className="text-edge-text-2 ml-1.5">
+                          on <span className="text-edge-text">{narr.eventTitle}</span>
+                          {narr.platform && (
+                            <span className="text-edge-dim text-[10px] ml-1">({narr.platform})</span>
+                          )}
+                        </span>
+                      )}
                     </span>
                   ) : (
                     narr.gateResult === false && (
@@ -191,7 +199,7 @@ export function ExecutionStepLog({ entries, isStreaming }: Props) {
                 </div>
               </div>
             ) : (
-              <div className="text-[11px] text-edge-dim font-mono">
+              <div className="text-xs text-edge-dim">
                 No signal data — markets scanned: {entry.narrations.length === 0 ? "0" : entry.narrations.length}
               </div>
             )}

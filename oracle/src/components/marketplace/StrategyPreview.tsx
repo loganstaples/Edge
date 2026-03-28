@@ -65,7 +65,7 @@ function PreviewCanvas({ strategy, onClose }: Props) {
             </div>
             <div>
               <h3 className="text-sm font-medium text-white">{strategy.name}</h3>
-              <p className="text-2xs font-mono text-edge-muted">
+              <p className="text-xs font-medium text-edge-muted mt-0.5">
                 by {strategy.authorName || "Anonymous"} · {strategy.nodes.length} nodes
               </p>
             </div>

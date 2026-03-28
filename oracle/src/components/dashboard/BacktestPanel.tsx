@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   AreaChart,
   Area,
@@ -15,7 +15,6 @@ import { TickNarrationBanner } from "./TickNarrationBanner";
 import { ExecutionStepLog } from "./ExecutionStepLog";
 import { BacktestSummaryCard } from "./BacktestSummaryCard";
 import type { TickNarration } from "@/lib/engine/backtester";
-import { BACKTEST_TICK_COST_USDC } from "@/lib/payments/constants";
 
 interface BacktestTrade {
   tick: number;
@@ -75,8 +74,6 @@ interface Props {
   connections?: any[];
   /** Called to highlight a node on the canvas during backtest (null = clear) */
   onNodeHighlight?: (nodeId: string | null) => void;
-  /** Called each tick with the cost amount — parent wires this to payment stream */
-  onTickPayment?: (amount: number) => void;
 }
 
 type Tab = "equity" | "trades" | "markets" | "log";
@@ -113,7 +110,7 @@ function makeEmptyResult(strategyId: string, ticks: number, period: string, star
   };
 }
 
-export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onNodeHighlight, onTickPayment }: Props) {
+export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onNodeHighlight }: Props) {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,82 +124,16 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
   const [currentTick, setCurrentTick] = useState(0);
   const [totalTicks, setTotalTicks] = useState(0);
   const [backtestDone, setBacktestDone] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastChargedTickRef = useRef(0);
-
-  // Poll for backtest job results
-  useEffect(() => {
-    if (!jobId || backtestDone) return;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/backtest-jobs/${jobId}`);
-        if (!res.ok) return;
-        const job = await res.json();
-
-        if (job.result) {
-          setResult(job.result);
-          setProgress(job.progress);
-          setCurrentTick(job.currentTick);
-          setTotalTicks(job.totalTicks);
-          setStreamPhase(`Tick ${job.currentTick + 1} / ${job.totalTicks}`);
-
-          // Charge for new ticks since last poll
-          if (onTickPayment && job.currentTick > lastChargedTickRef.current) {
-            const newTicks = job.currentTick - lastChargedTickRef.current;
-            onTickPayment(newTicks * BACKTEST_TICK_COST_USDC);
-            lastChargedTickRef.current = job.currentTick;
-          }
-
-          // Extract narration from latest tick
-          const tickData = job.result?.ticks;
-          if (tickData?.length > 0) {
-            const latestTick = tickData[tickData.length - 1];
-            if (latestTick?.narrations?.length > 0) {
-              const narrs = latestTick.narrations as TickNarration[];
-              const best = narrs.find((n: TickNarration) => n.tradeAction)
-                ?? narrs.reduce((a: TickNarration, b: TickNarration) =>
-                  Math.abs(b.edgePct ?? 0) > Math.abs(a.edgePct ?? 0) ? b : a);
-              setCurrentNarration(best);
-            }
-          }
-        }
-
-        if (job.status === "completed") {
-          setResult(job.result);
-          setProgress(1);
-          setBacktestDone(true);
-          setLoading(false);
-          setStreamPhase(null);
-          onNodeHighlight?.(null);
-          if (pollingRef.current) clearInterval(pollingRef.current);
-        } else if (job.status === "failed") {
-          setError(job.error || "Backtest failed");
-          setLoading(false);
-          setStreamPhase(null);
-          if (pollingRef.current) clearInterval(pollingRef.current);
-        }
-      } catch {
-        // Silently retry
-      }
-    };
-
-    // Poll every 2 seconds
-    poll();
-    pollingRef.current = setInterval(poll, 2000);
-
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [jobId, backtestDone, onNodeHighlight]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const runBacktest = useCallback(async () => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
 
     setLoading(true);
     setError(null);
-    setStreamPhase("Starting backtest...");
+    setStreamPhase("Connecting...");
     setProgress(0);
     setCurrentNarration(null);
     setCurrentTick(0);
@@ -210,7 +141,6 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
     setBacktestDone(false);
     setResult(makeEmptyResult(strategyId, ticks, period, 1000));
     setTab("equity");
-    setJobId(null);
 
     try {
       const res = await fetch(`/api/strategies/${strategyId}/backtest`, {
@@ -223,6 +153,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
           speed,
           ...(propNodes && propNodes.length > 0 ? { nodes: propNodes, connections: propConnections } : {}),
         }),
+        signal: abort.signal,
       });
 
       if (!res.ok) {
@@ -230,22 +161,75 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
         throw new Error(body.error || "Backtest failed");
       }
 
-      const data = await res.json();
-      setJobId(data.jobId);
-      setStreamPhase("Backtest running...");
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop()!;
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event: any;
+          try { event = JSON.parse(line); } catch { continue; }
+
+          if (event.type === "setup") {
+            setStreamPhase(event.message);
+          } else if (event.type === "node_start") {
+            // Highlight this node on the canvas — tracks real execution
+            onNodeHighlight?.(event.nodeId);
+          } else if (event.type === "tick") {
+            setResult(event.data);
+            setProgress((event.tick + 1) / event.totalTicks);
+            setStreamPhase(`Tick ${event.tick + 1} / ${event.totalTicks}`);
+            setCurrentTick(event.tick);
+            setTotalTicks(event.totalTicks);
+            // Clear highlight between ticks
+            onNodeHighlight?.(null);
+            // Extract narration from the latest tick
+            const latestTick = event.data?.ticks?.[event.data.ticks.length - 1];
+            if (latestTick?.narrations?.length > 0) {
+              const narrs = latestTick.narrations as TickNarration[];
+              const best = narrs.find((n: TickNarration) => n.tradeAction)
+                ?? narrs.reduce((a: TickNarration, b: TickNarration) =>
+                  Math.abs(b.edgePct ?? 0) > Math.abs(a.edgePct ?? 0) ? b : a);
+              setCurrentNarration(best);
+            } else {
+              setCurrentNarration(null);
+            }
+          } else if (event.type === "done") {
+            setResult(event.data);
+            setProgress(1);
+            setBacktestDone(true);
+            onNodeHighlight?.(null);
+          } else if (event.type === "error") {
+            setResult(null);
+            throw new Error(event.error);
+          }
+        }
+      }
     } catch (e) {
+      if ((e as Error).name === "AbortError") return;
       setError(e instanceof Error ? e.message : String(e));
+      if (!result?.ticks?.length) setResult(null);
+    } finally {
       setLoading(false);
       setStreamPhase(null);
-      setResult(null);
+      abortRef.current = null;
     }
-  }, [strategyId, ticks, period, speed, propNodes, propConnections]);
+  }, [strategyId, ticks, period, speed, propNodes, propConnections, onNodeHighlight]);
 
   // --- Launch UI ---
   if (!result && !loading) {
     return (
       <div className="flex flex-col items-center gap-5 py-6">
-        <p className="text-[10px] uppercase tracking-widest text-edge-muted font-semibold">
+        <p className="text-sm font-medium text-edge-muted mb-2">
           Backtest with real Polymarket & Gemini prices
         </p>
 
@@ -276,20 +260,15 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
 
         {/* Speed control */}
         <div className="flex items-center gap-1">
-          <span className="text-[9px] uppercase tracking-widest text-edge-muted font-semibold mr-2">Speed</span>
+          <span className="text-xs font-medium text-edge-muted mr-2">Speed</span>
           {(["slow", "normal", "fast"] as Speed[]).map((s) => (
             <button
               key={s}
               onClick={() => setSpeed(s)}
-              className={`px-3 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                speed === s
-                  ? "bg-white/[0.08] text-accent-cyan"
-                  : "text-edge-muted hover:text-edge-text hover:bg-white/[0.03]"
-              }`}
-              style={speed === s ? {
-                border: "1px solid rgba(34, 211, 238, 0.2)",
-                boxShadow: "0 0 8px rgba(34, 211, 238, 0.06)",
-              } : { border: "1px solid transparent" }}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${speed === s
+                ? "bg-white/10 text-white"
+                : "text-edge-muted hover:text-edge-text hover:bg-white/5"
+                }`}
             >
               {SPEED_LABELS[s]}
             </button>
@@ -298,13 +277,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
 
         <button
           onClick={runBacktest}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-lg text-accent-cyan transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-          style={{
-            background:
-              "linear-gradient(135deg, rgba(34, 211, 238, 0.12) 0%, rgba(34, 211, 238, 0.04) 100%)",
-            border: "1px solid rgba(34, 211, 238, 0.25)",
-            boxShadow: "0 0 12px rgba(34, 211, 238, 0.08)",
-          }}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg text-black bg-white hover:bg-white/90 transition-all duration-200"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -398,10 +371,10 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
       {/* Period & markets badge */}
       {!backtestDone && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[9px] uppercase tracking-widest text-edge-dim px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.04]">
+          <span className="text-xs text-edge-muted px-2.5 py-1 rounded-md bg-white/5 border border-white/10">
             {PERIOD_LABELS[result.config.period as Period] ?? result.config.period} · {result.config.ticks} ticks
           </span>
-          <span className="text-[9px] uppercase tracking-widest text-edge-dim px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.04]">
+          <span className="text-xs text-edge-muted px-2.5 py-1 rounded-md bg-white/5 border border-white/10">
             {marketsUsed.length} real market{marketsUsed.length !== 1 ? "s" : ""}
           </span>
         </div>
@@ -467,7 +440,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
         {!loading && (
           <button
             onClick={() => { setResult(null); setError(null); setBacktestDone(false); setCurrentNarration(null); }}
-            className="text-[10px] text-edge-muted hover:text-accent-cyan transition-colors px-2 py-1"
+            className="text-xs font-medium text-edge-muted hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-white/5"
           >
             New run
           </button>
@@ -546,56 +519,50 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
             </div>
           ) : (
             <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-[#0e1018]">
-                <tr className="text-edge-muted uppercase tracking-widest">
-                  <th className="text-left py-2 px-2 text-[10px] font-semibold">Date</th>
-                  <th className="text-left py-2 px-2 text-[10px] font-semibold">Market</th>
-                  <th className="text-left py-2 px-2 text-[10px] font-semibold">Platform</th>
-                  <th className="text-left py-2 px-2 text-[10px] font-semibold">Dir</th>
-                  <th className="text-right py-2 px-2 text-[10px] font-semibold">Entry</th>
-                  <th className="text-right py-2 px-2 text-[10px] font-semibold">Exit</th>
-                  <th className="text-right py-2 px-2 text-[10px] font-semibold">P&L</th>
-                  <th className="text-left py-2 px-2 text-[10px] font-semibold">Exit</th>
+              <thead className="sticky top-0 bg-[#0e1018] border-b border-edge-border/50">
+                <tr>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-edge-muted">Date</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-edge-muted">Market</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-edge-muted">Platform</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-edge-muted">Dir</th>
+                  <th className="text-right py-3 px-3 text-xs font-semibold text-edge-muted">Entry</th>
+                  <th className="text-right py-3 px-3 text-xs font-semibold text-edge-muted">Exit</th>
+                  <th className="text-right py-3 px-3 text-xs font-semibold text-edge-muted">P&L</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-edge-muted">Exit</th>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td colSpan={8} className="p-0">
-                    <div className="h-[1px] bg-white/[0.04]" />
-                  </td>
-                </tr>
                 {trades.map((trade, i) => (
-                  <tr key={i} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-1.5 px-2 text-edge-text-2 font-mono whitespace-nowrap text-[10px]">
+                  <tr key={i} className="hover:bg-white/5 transition-colors border-b border-white/5 last:border-0">
+                    <td className="py-2.5 px-3 text-edge-text whitespace-nowrap text-xs">
                       {new Date(trade.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </td>
-                    <td className="py-1.5 px-2 text-edge-text-2 max-w-[160px] truncate text-[10px]" title={trade.eventTitle}>
+                    <td className="py-2.5 px-3 text-edge-text max-w-[160px] truncate text-xs" title={trade.eventTitle}>
                       {trade.eventTitle}
                     </td>
-                    <td className="py-1.5 px-2 text-edge-text-2 capitalize text-[10px]">
+                    <td className="py-2.5 px-3 text-edge-text capitalize text-xs">
                       {trade.platform}
                     </td>
-                    <td className="py-1.5 px-2">
-                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold ${trade.direction === "YES" ? "bg-accent-green/15 text-accent-green" : "bg-accent-red/15 text-accent-red"}`}>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${trade.direction === "YES" ? "bg-accent-green/10 text-accent-green border border-accent-green/20" : "bg-accent-red/10 text-accent-red border border-accent-red/20"}`}>
                         {trade.direction}
                       </span>
                     </td>
-                    <td className="py-1.5 px-2 text-right font-mono text-edge-text text-[10px]">
+                    <td className="py-2.5 px-3 text-right font-medium text-edge-text text-xs">
                       {trade.entryPrice.toFixed(3)}
                     </td>
-                    <td className="py-1.5 px-2 text-right font-mono text-edge-text text-[10px]">
+                    <td className="py-2.5 px-3 text-right font-medium text-edge-text text-xs">
                       {trade.exitPrice.toFixed(3)}
                     </td>
-                    <td className={`py-1.5 px-2 text-right font-mono font-medium text-[10px] ${trade.pnl > 0 ? "text-accent-green" : trade.pnl < 0 ? "text-accent-red" : "text-edge-muted"}`}>
+                    <td className={`py-2.5 px-3 text-right font-medium text-xs ${trade.pnl > 0 ? "text-accent-green" : trade.pnl < 0 ? "text-accent-red" : "text-edge-muted"}`}>
                       {trade.pnl > 0 ? "+" : ""}{trade.pnl.toFixed(2)}
                     </td>
-                    <td className="py-1.5 px-2">
-                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold ${
-                        trade.exitReason?.includes("take-profit") ? "bg-accent-green/15 text-accent-green"
-                          : trade.exitReason?.includes("stop-loss") ? "bg-accent-red/15 text-accent-red"
-                          : trade.status === "open" ? "bg-accent-blue/15 text-accent-blue"
-                          : "bg-white/[0.04] text-edge-muted"
-                      }`}>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium border ${trade.exitReason?.includes("take-profit") ? "bg-accent-green/10 text-accent-green border-accent-green/20"
+                        : trade.exitReason?.includes("stop-loss") ? "bg-accent-red/10 text-accent-red border-accent-red/20"
+                          : trade.status === "open" ? "bg-accent-blue/10 text-accent-blue border-accent-blue/20"
+                            : "bg-white/5 text-edge-muted border-white/10"
+                        }`}>
                         {trade.exitReason || trade.status}
                       </span>
                     </td>

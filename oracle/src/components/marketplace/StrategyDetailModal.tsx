@@ -36,7 +36,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-edge-surface border border-edge-border rounded-lg px-3 py-1.5 shadow-xl">
-      <p className="text-xs font-mono text-white">${payload[0].value.toFixed(2)}</p>
+      <p className="text-sm font-medium text-white">${payload[0].value.toFixed(2)}</p>
     </div>
   );
 }
@@ -115,7 +115,7 @@ export function StrategyDetailModal({ strategy, onClose, onClone }: Props) {
                   </span>
                 )}
               </div>
-              <p className="text-2xs text-edge-muted font-mono">
+              <p className="text-xs mt-1 font-medium text-edge-muted">
                 by {strategy.creator} · {strategy.publishedAgo} · {strategy.clones} clones
               </p>
             </div>
@@ -144,9 +144,8 @@ export function StrategyDetailModal({ strategy, onClose, onClone }: Props) {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-white">Equity Curve</h3>
               <p
-                className={`text-lg font-mono font-semibold ${
-                  returnPositive ? "text-accent-green" : "text-accent-red"
-                }`}
+                className={`text-lg font-semibold ${returnPositive ? "text-emerald-400" : "text-rose-400"
+                  }`}
               >
                 {returnPositive ? "+" : ""}
                 {strategy.totalReturn.toFixed(1)}%
@@ -199,12 +198,12 @@ export function StrategyDetailModal({ strategy, onClose, onClone }: Props) {
             ].map((stat) => (
               <div
                 key={stat.label}
-                className="glass rounded-xl px-4 py-3 text-center"
+                className="px-4 py-3"
               >
-                <p className="text-[10px] text-edge-dim uppercase tracking-wider mb-1">
+                <p className="text-xs font-medium text-edge-muted mb-1">
                   {stat.label}
                 </p>
-                <p className={`text-xl font-mono font-semibold ${stat.color}`}>
+                <p className={`text-xl font-semibold ${stat.color === "text-accent-green" ? "text-emerald-400" : stat.color === "text-accent-red" ? "text-rose-400" : stat.color}`}>
                   {stat.value}
                 </p>
               </div>
@@ -222,7 +221,7 @@ export function StrategyDetailModal({ strategy, onClose, onClone }: Props) {
             <div className="flex items-center gap-1.5 flex-wrap">
               {strategy.nodePipeline.map((node, i) => (
                 <div key={i} className="flex items-center gap-1.5">
-                  <span className="px-2.5 py-1 text-2xs font-mono rounded-md bg-edge-bg border border-edge-border text-edge-text-2">
+                  <span className="px-2.5 py-1 text-xs font-medium rounded-md bg-edge-surface border border-edge-border text-edge-text-2">
                     {node}
                   </span>
                   {i < strategy.nodePipeline.length - 1 && (
@@ -268,7 +267,7 @@ export function StrategyDetailModal({ strategy, onClose, onClone }: Props) {
           <div className="flex items-center gap-3 pt-2">
             <button
               onClick={onClone}
-              className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-accent-blue text-white text-sm font-semibold hover:bg-accent-blue/80 transition-colors cursor-pointer shadow-lg shadow-accent-blue/25"
+              className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors cursor-pointer"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />

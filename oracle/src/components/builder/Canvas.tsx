@@ -33,6 +33,7 @@ import { usePaymentStream } from "@/hooks/usePaymentStream";
 import { MiniActivityFeed } from "./MiniActivityFeed";
 import { PaymentModal } from "./PaymentModal";
 import { TICK_COST_USDC } from "@/lib/payments/constants";
+import { STRATEGIES as MARKETPLACE_STRATEGIES } from "@/lib/marketplace-data";
 
 type StrategyStatus = "draft" | "running" | "paused" | "stopped";
 
@@ -158,6 +159,28 @@ function CanvasInner() {
       .catch(() => {})
       .finally(() => setStrategyLoading(false));
   }, [wallet.address, vault.isUnlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clone marketplace strategy — load nodes/connections directly from seed data
+  const clonedRef = useRef(false);
+  useEffect(() => {
+    const cloneId = searchParams.get("clone");
+    if (!cloneId || clonedRef.current) return;
+    clonedRef.current = true;
+
+    const marketplaceStrat = MARKETPLACE_STRATEGIES.find((s) => s.id === cloneId);
+    if (!marketplaceStrat) return;
+
+    setNodes(deserializeNodes(marketplaceStrat.nodes));
+    setEdges(deserializeEdges(marketplaceStrat.connections));
+    setStrategyName(`${marketplaceStrat.name} (Clone)`);
+    setStrategyStatus("draft");
+
+    // Clean URL so refreshing doesn't re-clone
+    window.history.replaceState(null, "", "/");
+
+    // Fit view after nodes are rendered
+    setTimeout(() => rfInstance?.fitView({ padding: 0.15, duration: 400 }), 100);
+  }, [searchParams, rfInstance]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onConnect = useCallback(
     (connection: Connection) => {

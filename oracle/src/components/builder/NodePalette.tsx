@@ -191,7 +191,7 @@ export function NodePalette() {
                       key={node.type}
                       draggable="true"
                       onDragStart={(e) => onDragStart(e, node.type)}
-                      className="group flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl cursor-grab
+                      className="group px-2.5 py-1.5 rounded-xl cursor-grab
                         transition-all duration-200
                         hover:scale-[1.02] active:scale-[0.98]"
                       style={{
@@ -207,22 +207,8 @@ export function NodePalette() {
                         e.currentTarget.style.border = "1px solid transparent";
                       }}
                     >
-                      <div
-                        className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                        style={{
-                          background: `${node.color}12`,
-                          border: `1px solid ${node.color}18`,
-                        }}
-                      >
-                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: node.color, boxShadow: `0 0 6px ${node.color}60` }} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-medium text-edge-text/90 group-hover:text-white truncate transition-colors">
-                          {node.label}
-                        </div>
-                        <div className="text-[9px] text-edge-muted/60 leading-tight mt-0.5 truncate">
-                          {node.description}
-                        </div>
+                      <div className="text-[11px] font-medium text-edge-text/90 group-hover:text-white truncate transition-colors">
+                        {node.label}
                       </div>
                     </div>
                   ))}

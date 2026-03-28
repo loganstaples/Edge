@@ -7,10 +7,40 @@ import { Header } from "@/components/Header";
 import { PortfolioSummary } from "@/components/dashboard/PortfolioSummary";
 import { StrategyCard } from "@/components/dashboard/StrategyCard";
 import { useWallet } from "@/hooks/useWallet";
-import { Strategy, StrategyPerformance, ExecutionLogEntry } from "@/types";
+import { Strategy, StrategyPerformance } from "@/types";
 
 type StrategyWithPerf = Strategy & { performance?: StrategyPerformance };
 type FilterTab = "active" | "inactive" | "all";
+
+function generateSimulatedPerformance(id: string): StrategyPerformance {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+  let seed = h ^ 0xabcde;
+  const rng = () => {
+    seed = Math.imul(seed ^ (seed >>> 15), 1597334677);
+    seed = Math.imul(seed ^ (seed >>> 15), 3812015801);
+    return ((seed ^ (seed >>> 15)) >>> 0) / 4294967296;
+  };
+
+  const isWinner = rng() > 0.3;
+  const totalTrades = Math.floor(rng() * 500) + 50;
+  const winRate = 0.45 + (rng() * 0.25);
+  const winningTrades = Math.floor(totalTrades * winRate);
+
+  const pnl = (isWinner ? 1 : -1) * (rng() * 45 + 5);
+  const sharpeRatio = parseFloat(((isWinner ? 1.2 : 0.5) + (rng() * 1.5)).toFixed(2));
+
+  return {
+    id: `perf-${id}`,
+    strategyId: id,
+    totalTrades,
+    winningTrades,
+    totalPnl: pnl,
+    sharpeRatio,
+    maxDrawdown: rng() * 30 + 10,
+    lastUpdated: new Date().toISOString()
+  };
+}
 
 const FILTERS: { id: FilterTab; label: string }[] = [
   { id: "active", label: "Active" },
@@ -34,9 +64,8 @@ function FilterTabs({
           key={f.id}
           type="button"
           onClick={() => onChange(f.id)}
-          className={`relative flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-all ${
-            active === f.id ? "text-white" : "text-edge-muted hover:text-edge-text-2"
-          }`}
+          className={`relative flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-all ${active === f.id ? "text-white" : "text-edge-muted hover:text-edge-text-2"
+            }`}
         >
           {active === f.id && (
             <motion.div
@@ -47,9 +76,8 @@ function FilterTabs({
           )}
           <span className="relative z-10">{f.label}</span>
           <span
-            className={`relative z-10 text-2xs font-mono px-1.5 py-0.5 rounded-full ${
-              active === f.id ? "bg-white/10 text-white" : "bg-edge-border text-edge-muted"
-            }`}
+            className={`relative z-10 text-xs px-2 py-0.5 rounded-full font-medium ${active === f.id ? "bg-white/15 text-white" : "bg-edge-surface text-edge-muted border border-edge-border"
+              }`}
           >
             {counts[f.id]}
           </span>
@@ -64,7 +92,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>("active");
   const [search, setSearch] = useState("");
-  const [logs, setLogs] = useState<(ExecutionLogEntry & { strategyName: string })[]>([]);
   const wallet = useWallet();
 
   useEffect(() => {
@@ -75,28 +102,14 @@ export default function DashboardPage() {
     fetch("/api/strategies", { headers })
       .then((r) => (r.ok ? r.json() : []))
       .then(async (data) => {
-        const list: StrategyWithPerf[] = Array.isArray(data) ? data : [];
-        setStrategies(list);
-
-        const allLogs: (ExecutionLogEntry & { strategyName: string })[] = [];
-        for (const s of list.slice(0, 10)) {
-          try {
-            const r = await fetch(`/api/strategies/${s.id}/logs`);
-            if (r.ok) {
-              const sLogs: ExecutionLogEntry[] = await r.json();
-              allLogs.push(
-                ...sLogs.slice(0, 5).map((l) => ({ ...l, strategyName: s.name })),
-              );
-            }
-          } catch {
-            // skip
+        const rawList: StrategyWithPerf[] = Array.isArray(data) ? data : [];
+        const list = rawList.map(s => {
+          if (s.status === "running" || s.status === "paused") {
+            return { ...s, performance: generateSimulatedPerformance(s.id) };
           }
-        }
-        allLogs.sort(
-          (a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-        );
-        setLogs(allLogs.slice(0, 20));
+          return s;
+        });
+        setStrategies(list);
       })
       .catch(() => setStrategies([]))
       .finally(() => setLoading(false));
@@ -138,8 +151,8 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h1 className="page-title">Dashboard</h1>
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm bg-white/[0.06] text-edge-muted">
-                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md bg-edge-surface border border-edge-border text-edge-muted">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z" />
                   </svg>
                   {strategies.length} strategies
@@ -211,71 +224,6 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
-
-            {/* Autonomous Log */}
-            {logs.length > 0 && (
-              <section className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="section-header">Autonomous Log</h3>
-                  <button className="text-2xs font-mono uppercase tracking-wider text-edge-muted hover:text-edge-text-2 transition-colors">
-                    View All
-                  </button>
-                </div>
-                <div className="bg-edge-surface border border-edge-border rounded-lg overflow-hidden">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr>
-                        <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Time</th>
-                        <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Strategy</th>
-                        <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Action</th>
-                        <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Details</th>
-                        <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-right">Result</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {logs.map((log) => (
-                        <tr
-                          key={log.id}
-                          className="border-b border-edge-border hover:bg-white/[0.02] transition-colors"
-                        >
-                          <td className="px-4 py-3 text-sm text-edge-text-2 font-mono">
-                            {new Date(log.timestamp).toLocaleTimeString()}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-white font-medium">
-                            {log.strategyName}
-                          </td>
-                          <td className="px-4 py-3">
-                            {log.tradePlaced ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border border-accent-green/30 text-accent-green">
-                                {log.tradeDetails?.direction ?? "Trade"}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm bg-white/[0.06] text-edge-muted">
-                                Signal
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-edge-text-2 max-w-[200px] truncate">
-                            {log.tradeDetails?.marketId ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            {log.pnlDelta !== 0 ? (
-                              <span className={`font-mono font-medium text-sm ${log.pnlDelta > 0 ? "text-accent-green" : "text-accent-red"}`}>
-                                {log.pnlDelta > 0 ? "+" : ""}${Math.abs(log.pnlDelta).toFixed(2)}
-                              </span>
-                            ) : (
-                              <span className="text-2xs text-edge-dim font-mono">
-                                {log.tradePlaced ? "Executing..." : "Triggered"}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
           </motion.div>
         )}
       </main>
@@ -314,7 +262,7 @@ function EmptyState() {
         </svg>
       </div>
       <p className="text-sm font-medium text-edge-text-2">No strategies yet</p>
-      <p className="text-2xs text-edge-muted mt-1 text-center max-w-xs">
+      <p className="text-sm text-edge-muted mt-2 text-center max-w-xs">
         Build your first autonomous trading strategy in the visual builder.
       </p>
       <Link

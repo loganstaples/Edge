@@ -58,7 +58,7 @@ export function BacktestSummaryCard({ metrics, trades, totalTicks, startingCapit
       {/* Header: Backtest Complete */}
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-accent-cyan" style={{ boxShadow: "0 0 8px rgba(34, 211, 238, 0.5)" }} />
-        <span className="text-[10px] uppercase tracking-widest text-accent-cyan font-semibold">
+        <span className="text-xs font-semibold text-accent-cyan">
           Backtest Complete
         </span>
       </div>
@@ -66,13 +66,13 @@ export function BacktestSummaryCard({ metrics, trades, totalTicks, startingCapit
       {/* Big P&L number */}
       <div className="text-center py-2">
         <div
-          className="text-[32px] font-semibold font-mono tabular-nums leading-none"
+          className="text-4xl font-bold tracking-tight leading-none"
           style={{ color: isPositive ? "#34d399" : "#f87171" }}
         >
           {isPositive ? "+" : ""}${metrics.totalReturn.toFixed(2)}
         </div>
         <div
-          className="text-sm font-mono mt-1"
+          className="text-sm font-medium mt-2"
           style={{ color: isPositive ? "rgba(52, 211, 153, 0.7)" : "rgba(248, 113, 113, 0.7)" }}
         >
           {isPositive ? "+" : ""}{metrics.totalReturnPct.toFixed(1)}% return on ${startingCapital.toLocaleString()}
@@ -110,7 +110,7 @@ export function BacktestSummaryCard({ metrics, trades, totalTicks, startingCapit
           value={
             metrics.profitFactor === Infinity ? "INF"
               : metrics.profitFactor == null ? "N/A"
-              : metrics.profitFactor.toFixed(2)
+                : metrics.profitFactor.toFixed(2)
           }
         />
       </div>
@@ -120,7 +120,7 @@ export function BacktestSummaryCard({ metrics, trades, totalTicks, startingCapit
         className="rounded-lg px-3 py-2.5 text-[12px] text-edge-text-2 leading-relaxed"
         style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.04)" }}
       >
-        <span className="text-edge-dim text-[10px] uppercase tracking-wider font-semibold mr-2">Assessment:</span>
+        <span className="text-edge-text text-sm font-semibold mr-2">Assessment:</span>
         {assessment}
       </div>
     </div>
@@ -133,8 +133,8 @@ function StatCell({ label, value, valueColor }: { label: string; value: string; 
       className="rounded-lg px-3 py-2"
       style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.03)" }}
     >
-      <div className="text-[9px] uppercase tracking-widest text-edge-muted font-semibold mb-0.5">{label}</div>
-      <div className="text-sm font-mono font-semibold" style={{ color: valueColor ?? "#eaeaf0" }}>{value}</div>
+      <div className="text-xs font-medium text-edge-muted mb-1">{label}</div>
+      <div className="text-lg font-semibold tracking-tight" style={{ color: valueColor ?? "#eaeaf0" }}>{value}</div>
     </div>
   );
 }

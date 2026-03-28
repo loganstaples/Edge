@@ -23,8 +23,8 @@ function StatCard({
   delay?: number;
 }) {
   const colorMap = {
-    green: "text-accent-green",
-    red: "text-accent-red",
+    green: "text-emerald-400",
+    red: "text-rose-400",
     muted: "text-edge-muted",
   };
 
@@ -39,14 +39,14 @@ function StatCard({
         {icon}
       </div>
       <div className="space-y-1">
-        <p className="text-2xs font-mono uppercase tracking-wider text-edge-muted">
+        <p className="text-sm font-medium text-edge-muted">
           {label}
         </p>
-        <p className="text-2xl font-light tracking-tight text-white">
+        <p className="text-3xl font-semibold tracking-tight text-white mb-1">
           {value}
         </p>
         {delta && (
-          <p className={`text-2xs ${colorMap[deltaColor ?? "muted"]}`}>
+          <p className={`text-sm ${colorMap[deltaColor ?? "muted"]}`}>
             {delta}
           </p>
         )}
@@ -59,10 +59,10 @@ export function PortfolioSummary({ strategies }: Props) {
   const runningCount = strategies.filter((s) => s.status === "running").length;
   const pausedCount = strategies.filter((s) => s.status === "paused").length;
 
-  const totalPnl = strategies.reduce(
-    (sum, s) => sum + (s.performance?.totalPnl ?? 0),
-    0,
-  );
+  const activeStrategies = strategies.filter(s => s.status === "running" || s.status === "paused");
+  const avgPnl = activeStrategies.length > 0
+    ? activeStrategies.reduce((sum, s) => sum + (s.performance?.totalPnl ?? 0), 0) / activeStrategies.length
+    : 0;
 
   const totalTrades = strategies.reduce(
     (sum, s) => sum + (s.performance?.totalTrades ?? 0),
@@ -74,19 +74,24 @@ export function PortfolioSummary({ strategies }: Props) {
     0,
   );
 
-  const pnlPositive = totalPnl >= 0;
-  const winRate = totalTrades > 0 ? ((totalWinning / totalTrades) * 100).toFixed(1) : "--";
+  const pnlPositive = avgPnl >= 0;
+  const totalLosing = strategies.reduce(
+    (sum, s) => sum + ((s.performance?.totalTrades ?? 0) - (s.performance?.winningTrades ?? 0)),
+    0,
+  );
+  const decidedTrades = totalWinning + totalLosing;
+  const winRate = decidedTrades > 0 ? ((totalWinning / decidedTrades) * 100).toFixed(1) : "--";
 
   const pnlPct =
-    totalPnl !== 0
-      ? ((totalPnl / Math.max(Math.abs(totalPnl) * 8, 1)) * 100).toFixed(1)
+    avgPnl !== 0
+      ? ((avgPnl / Math.max(Math.abs(avgPnl) * 8, 1)) * 100).toFixed(1)
       : "0.0";
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       <StatCard
-        label="Total P&L"
-        value={`${pnlPositive ? "+" : "-"}$${Math.abs(totalPnl).toFixed(2)}`}
+        label="Avg Weekly P&L"
+        value={`${avgPnl > 0 ? "+" : ""}${avgPnl.toFixed(2)}%`}
         delta={`${pnlPositive ? "↑" : "↓"} ${pnlPositive ? "+" : ""}${pnlPct}%`}
         deltaColor={pnlPositive ? "green" : "red"}
         delay={0}

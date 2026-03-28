@@ -37,12 +37,12 @@ export function PublicStrategyCard({ strategy, onView, onClone }: Props) {
             </div>
             <div className="min-w-0">
               <h3 className="text-base font-medium text-white truncate">{strategy.name}</h3>
-              <p className="text-2xs font-mono text-edge-muted">
+              <p className="text-xs font-medium text-edge-muted mt-1">
                 by {strategy.authorName || "Anonymous"}
               </p>
             </div>
           </div>
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border border-accent-blue/30 text-accent-blue shrink-0">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-accent-blue/10 text-accent-blue shrink-0">
             Public
           </span>
         </div>
@@ -53,28 +53,28 @@ export function PublicStrategyCard({ strategy, onView, onClone }: Props) {
         )}
 
         {/* Meta row */}
-        <div className="flex items-center gap-4 text-2xs text-edge-dim mb-4">
-          <span className="font-mono">{strategy.nodes.length} nodes</span>
+        <div className="flex items-center gap-4 text-xs font-medium text-edge-dim mb-4">
+          <span>{strategy.nodes.length} nodes</span>
           <span>{new Date(strategy.createdAt).toLocaleDateString()}</span>
         </div>
 
-        {/* Stats Grid — HELIX-style internal blocks */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-            <p className="text-2xs text-edge-muted">P&L</p>
-            <p className={`text-lg font-mono font-light ${pnlPositive ? "text-accent-green" : "text-accent-red"}`}>
+        {/* Stats Grid */}
+        <div className="flex items-center justify-between mb-6 pt-3 border-t border-edge-border/30">
+          <div>
+            <p className="text-xs font-medium text-edge-muted mb-1">P&L</p>
+            <p className={`text-base font-semibold ${pnlPositive ? "text-emerald-400" : "text-rose-400"}`}>
               {pnl !== 0 ? `${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}` : "—"}
             </p>
           </div>
-          <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-            <p className="text-2xs text-edge-muted">Win Rate</p>
-            <p className="text-lg font-mono font-light text-white">
+          <div>
+            <p className="text-xs font-medium text-edge-muted mb-1">Win Rate</p>
+            <p className="text-base font-semibold text-white">
               {winRate}{winRate !== "—" && "%"}
             </p>
           </div>
-          <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-            <p className="text-2xs text-edge-muted">Sharpe</p>
-            <p className="text-lg font-mono font-light text-white">
+          <div>
+            <p className="text-xs font-medium text-edge-muted mb-1">Sharpe</p>
+            <p className="text-base font-semibold text-white">
               {perf?.sharpeRatio?.toFixed(2) ?? "—"}
             </p>
           </div>
@@ -94,14 +94,14 @@ export function PublicStrategyCard({ strategy, onView, onClone }: Props) {
           </button>
           <button
             onClick={(e) => { e.preventDefault(); onClone(); }}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-edge-surface border border-edge-border text-sm text-edge-text hover:border-edge-border-2 hover:text-white transition-colors cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors cursor-pointer"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
             </svg>
             Clone
           </button>
-          <span className="text-2xs text-edge-dim font-mono ml-auto">
+          <span className="text-xs font-medium text-edge-dim ml-auto">
             {perf?.totalTrades ?? 0} trades
           </span>
         </div>

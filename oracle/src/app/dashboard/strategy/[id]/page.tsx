@@ -14,17 +14,15 @@ import { nodeTypeComponents } from "@/components/builder/nodes";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
 import { useStrategyVault } from "@/hooks/useStrategyVault";
 import { useWallet } from "@/hooks/useWallet";
-import { usePaymentStream } from "@/hooks/usePaymentStream";
-import { StreamIndicator } from "@/components/builder/StreamIndicator";
 import type { Strategy, StrategyPerformance } from "@/types";
 
 type DetailTab = "overview" | "logs" | "backtest";
 
-const statusStyles: Record<string, { label: string; badgeClass: string; glow: string }> = {
-  running: { label: "Live", badgeClass: "text-accent-green border-accent-green/30", glow: "0 0 8px rgba(52, 211, 153, 0.3)" },
-  paused: { label: "Paused", badgeClass: "text-accent-amber border-accent-amber/30", glow: "none" },
-  draft: { label: "Draft", badgeClass: "text-edge-muted border-edge-border", glow: "none" },
-  stopped: { label: "Stopped", badgeClass: "text-accent-red border-accent-red/30", glow: "none" },
+const statusStyles: Record<string, { label: string; badgeClass: string }> = {
+  running: { label: "Live", badgeClass: "bg-accent-green/10 text-accent-green border-accent-green/20" },
+  paused: { label: "Paused", badgeClass: "bg-accent-amber/10 text-accent-amber border-accent-amber/20" },
+  draft: { label: "Draft", badgeClass: "bg-white/5 text-edge-muted border-white/10" },
+  stopped: { label: "Stopped", badgeClass: "bg-accent-red/10 text-accent-red border-accent-red/20" },
 };
 
 function StrategyCanvas({ strategy, nodeStatuses, highlightNodeId, animateEdges }: {
@@ -96,7 +94,7 @@ export default function StrategyDetailPage() {
         const match = (Array.isArray(all) ? all : []).find((s: any) => s.id === id);
         if (match?.performance) setPerf(match.performance);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [id, wallet.address]);
 
@@ -114,19 +112,6 @@ export default function StrategyDetailPage() {
     30000
   );
 
-  // Payment stream for backtest
-  const paymentStream = usePaymentStream();
-
-  // Start a backtest payment stream when we enter the backtest tab
-  const handleBacktestTickPayment = useCallback(async (amount: number) => {
-    if (!wallet.address) return;
-    if (!paymentStream.stream) {
-      // Auto-start stream for backtest
-      await paymentStream.startStream(id, wallet.address, 2000, wallet.signAndSendTransaction);
-    }
-    paymentStream.recordTick(amount);
-  }, [wallet.address, wallet.signAndSendTransaction, paymentStream, id]);
-
   // Backtest canvas: highlight tracks real server-side execution
   const [btHighlightNode, setBtHighlightNode] = useState<string | null>(null);
 
@@ -140,7 +125,7 @@ export default function StrategyDetailPage() {
       await fetch(`/api/strategies/${id}/${action}`, { method: "POST" });
       const res = await fetch(`/api/strategies/${id}`);
       if (res.ok) setStrategy(await res.json());
-    } catch {}
+    } catch { }
     setActionLoading(false);
   };
 
@@ -209,8 +194,7 @@ export default function StrategyDetailPage() {
           </nav>
 
           {/* Header panel */}
-          <div className="glass relative overflow-hidden rounded-lg p-6">
-            <div className="gradient-top-edge" />
+          <div className="bg-edge-surface border border-edge-border rounded-xl p-6 shadow-sm">
 
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0 flex items-start gap-4">
@@ -223,8 +207,7 @@ export default function StrategyDetailPage() {
                   <div className="flex items-center gap-3 mb-1">
                     <h1 className="text-xl font-semibold text-white truncate">{strategy.name}</h1>
                     <span
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border shrink-0 ${status.badgeClass}`}
-                      style={{ boxShadow: status.glow }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border shrink-0 ${status.badgeClass}`}
                     >
                       {strategy.status === "running" && (
                         <span className="relative flex h-1.5 w-1.5">
@@ -238,7 +221,7 @@ export default function StrategyDetailPage() {
                   {strategy.description && (
                     <p className="text-2xs text-edge-muted mb-2">{strategy.description}</p>
                   )}
-                  <div className="flex items-center gap-4 text-2xs text-edge-dim font-mono">
+                  <div className="flex items-center gap-4 text-xs text-edge-muted">
                     {strategy.nftMint && (
                       <span className="inline-flex items-center gap-1 text-violet-400">
                         <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -265,9 +248,15 @@ export default function StrategyDetailPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-3 shrink-0">
                 {isExecuting && (
-                  <span className="text-2xs text-accent-green animate-pulse mr-1 font-mono">Executing...</span>
+                  <span className="text-xs text-accent-green font-medium animate-pulse flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-green" />
+                    </span>
+                    Executing...
+                  </span>
                 )}
                 {strategy.nftMint && (
                   <a
@@ -308,25 +297,25 @@ export default function StrategyDetailPage() {
               </div>
             </div>
 
-            {/* Stats row — HELIX-style internal blocks */}
-            <div className="grid grid-cols-4 gap-3 mt-5">
-              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-                <p className="text-2xs text-edge-muted">P&L</p>
-                <p className={`text-lg font-mono font-light ${pnl >= 0 ? "text-accent-green" : "text-accent-red"}`}>
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-edge-border/50">
+              <div>
+                <p className="text-xs text-edge-muted mb-1">Total P&L</p>
+                <p className={`text-2xl font-semibold tracking-tight ${pnl >= 0 ? "text-accent-green" : "text-accent-red"}`}>
                   {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
                 </p>
               </div>
-              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-                <p className="text-2xs text-edge-muted">Trades</p>
-                <p className="text-lg font-mono font-light text-white">{perf?.totalTrades ?? 0}</p>
+              <div>
+                <p className="text-xs text-edge-muted mb-1">Total Trades</p>
+                <p className="text-2xl font-semibold tracking-tight text-white">{perf?.totalTrades ?? 0}</p>
               </div>
-              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-                <p className="text-2xs text-edge-muted">Win Rate</p>
-                <p className="text-lg font-mono font-light text-white">{winRate}{winRate !== "—" && "%"}</p>
+              <div>
+                <p className="text-xs text-edge-muted mb-1">Win Rate</p>
+                <p className="text-2xl font-semibold tracking-tight text-white">{winRate}{winRate !== "—" && "%"}</p>
               </div>
-              <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-                <p className="text-2xs text-edge-muted">Sharpe</p>
-                <p className="text-lg font-mono font-light text-white">{perf?.sharpeRatio?.toFixed(2) ?? "—"}</p>
+              <div>
+                <p className="text-xs text-edge-muted mb-1">Sharpe Ratio</p>
+                <p className="text-2xl font-semibold tracking-tight text-white">{perf?.sharpeRatio?.toFixed(2) ?? "—"}</p>
               </div>
             </div>
           </div>
@@ -337,9 +326,8 @@ export default function StrategyDetailPage() {
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
-                className={`relative flex items-center px-4 py-1.5 rounded-md text-sm transition-all ${
-                  tab === t.key ? "text-white" : "text-edge-muted hover:text-edge-text-2"
-                }`}
+                className={`relative flex items-center px-4 py-1.5 rounded-md text-sm transition-all ${tab === t.key ? "text-white" : "text-edge-muted hover:text-edge-text-2"
+                  }`}
               >
                 {tab === t.key && (
                   <motion.div
@@ -355,8 +343,7 @@ export default function StrategyDetailPage() {
 
           {/* Tab content */}
           {tab === "overview" && (
-            <div className="glass relative overflow-hidden rounded-lg" style={{ height: "500px" }}>
-              <div className="gradient-top-edge" />
+            <div className="bg-edge-surface border border-edge-border rounded-xl overflow-hidden shadow-sm" style={{ height: "500px" }}>
               <ReactFlowProvider>
                 <StrategyCanvas strategy={strategyWithNodes!} nodeStatuses={nodeStatuses} />
               </ReactFlowProvider>
@@ -365,12 +352,12 @@ export default function StrategyDetailPage() {
 
           {tab === "logs" && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
-                <h3 className="text-2xs font-mono uppercase tracking-wider text-edge-muted mb-4">Execution Log</h3>
+              <div className="bg-edge-surface border border-edge-border rounded-xl p-6 shadow-sm">
+                <h3 className="text-sm font-semibold text-white mb-6">Execution Log</h3>
                 <ExecutionLog strategyId={id} pollInterval={strategy.status === "running" ? 10000 : 0} />
               </div>
-              <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
-                <h3 className="text-2xs font-mono uppercase tracking-wider text-edge-muted mb-4">Trade History</h3>
+              <div className="bg-edge-surface border border-edge-border rounded-xl p-6 shadow-sm">
+                <h3 className="text-sm font-semibold text-white mb-6">Trade History</h3>
                 <TradeHistory strategyId={id} pollInterval={strategy.status === "running" ? 10000 : 0} />
               </div>
             </div>
@@ -381,10 +368,9 @@ export default function StrategyDetailPage() {
               {/* Live strategy canvas with node highlighting during backtest */}
               {strategyWithNodes && strategyWithNodes.nodes.length > 0 && (
                 <div
-                  className="glass relative overflow-hidden rounded-lg"
+                  className="bg-edge-surface border border-edge-border rounded-xl overflow-hidden shadow-sm"
                   style={{ height: "340px" }}
                 >
-                  <div className="gradient-top-edge" />
                   <ReactFlowProvider>
                     <StrategyCanvas
                       strategy={strategyWithNodes}
@@ -395,17 +381,12 @@ export default function StrategyDetailPage() {
                   </ReactFlowProvider>
                 </div>
               )}
-              {/* Payment stream indicator */}
-              {paymentStream.stream && (
-                <StreamIndicator stream={paymentStream.stream} walletBalance={wallet.balance} />
-              )}
-              <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
+              <div className="bg-edge-surface border border-edge-border rounded-xl p-6 shadow-sm">
                 <BacktestPanel
                   strategyId={id}
                   nodes={vaultEntry?.nodes}
                   connections={vaultEntry?.connections}
                   onNodeHighlight={handleNodeHighlight}
-                  onTickPayment={handleBacktestTickPayment}
                 />
               </div>
             </div>

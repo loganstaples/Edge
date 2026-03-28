@@ -50,12 +50,12 @@ export function ExecutionLog({ strategyId, pollInterval = 0 }: Props) {
   return (
     <div className="w-full overflow-x-auto">
       <table className="w-full border-collapse">
-        <thead>
+        <thead className="border-b border-edge-border/50">
           <tr>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Timestamp</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Trade</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Details</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-right">P&L Delta</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Timestamp</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Trade</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Details</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-right">P&L Delta</th>
           </tr>
         </thead>
         <tbody>
@@ -64,33 +64,31 @@ export function ExecutionLog({ strategyId, pollInterval = 0 }: Props) {
               key={log.id}
               className="border-b border-edge-border hover:bg-white/[0.02] transition-colors"
             >
-              <td className="px-4 py-3 text-sm text-edge-text-2 font-mono whitespace-nowrap">
+              <td className="px-4 py-3 text-sm text-edge-text whitespace-nowrap">
                 {new Date(log.timestamp).toLocaleString()}
               </td>
               <td className="px-4 py-3">
                 <span
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm ${
-                    log.tradePlaced
-                      ? "border border-accent-green/30 text-accent-green"
-                      : "bg-white/[0.06] text-edge-muted"
-                  }`}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md border ${log.tradePlaced
+                      ? "bg-accent-green/10 text-accent-green border-accent-green/20"
+                      : "bg-white/5 text-edge-muted border-white/10"
+                    }`}
                 >
                   {log.tradePlaced ? "YES" : "NO"}
                 </span>
               </td>
-              <td className="px-4 py-3 text-sm text-edge-text-2 max-w-[200px] truncate">
+              <td className="px-4 py-3 text-sm text-edge-text max-w-[200px] truncate">
                 {log.tradeDetails
                   ? `${log.tradeDetails.direction ?? ""} ${log.tradeDetails.marketId ?? ""}`
                   : "—"}
               </td>
               <td
-                className={`px-4 py-3 text-right font-mono text-sm ${
-                  log.pnlDelta > 0
+                className={`px-4 py-3 text-right font-medium text-sm ${log.pnlDelta > 0
                     ? "text-accent-green"
                     : log.pnlDelta < 0
                       ? "text-accent-red"
                       : "text-edge-muted"
-                }`}
+                  }`}
               >
                 {log.pnlDelta > 0 ? "+" : ""}
                 {log.pnlDelta.toFixed(2)}
