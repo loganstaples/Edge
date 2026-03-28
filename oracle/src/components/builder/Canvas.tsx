@@ -417,17 +417,21 @@ function CanvasInner() {
     setStrategyStatus("stopped");
   }, [paymentStream]);
 
-  // --- Streaming: clear canvas and prepare for incremental node rendering ---
+  // --- Streaming: prepare for incremental node rendering (keep current canvas visible) ---
   const handleStreamStart = useCallback(() => {
     setIsStreamingIn(true);
     isStreamingRef.current = true;
     streamCategoryCountRef.current = {};
-    setNodes([]);
-    setEdges([]);
-  }, [setNodes, setEdges]);
+    streamFirstBatchRef.current = true;
+    // Don't clear nodes/edges here — keep the current canvas visible
+    // until new nodes arrive. The canvas gets replaced in handleStreamingNodes
+    // (first batch) or handleStrategyGenerated (non-streaming).
+  }, []);
 
   // --- Streaming: add newly parsed nodes with entrance animation ---
   const CATEGORY_COL: Record<string, number> = { data: 0, ai: 1, logic: 2, action: 3 };
+
+  const streamFirstBatchRef = useRef(true);
 
   const handleStreamingNodes = useCallback(
     (rawNodes: any[]) => {
@@ -447,7 +451,14 @@ function CanvasInner() {
         };
       });
 
-      setNodes((nds) => [...nds, ...nodesToAdd]);
+      // On first batch of new nodes, replace the old canvas
+      if (streamFirstBatchRef.current) {
+        streamFirstBatchRef.current = false;
+        setNodes(nodesToAdd);
+        setEdges([]);
+      } else {
+        setNodes((nds) => [...nds, ...nodesToAdd]);
+      }
 
       // Remove entrance class after animation completes
       const ids = new Set(nodesToAdd.map((n) => n.id));
