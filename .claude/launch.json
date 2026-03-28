@@ -3,10 +3,9 @@
   "configurations": [
     {
       "name": "edge-app",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3000,
-      "cwd": "oracle",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd oracle && npx next dev -p ${PORT:-3002}"],
+      "port": 3002,
       "autoPort": true
     }
   ]

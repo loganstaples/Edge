@@ -14,6 +14,8 @@ import { nodeTypeComponents } from "@/components/builder/nodes";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
 import { useStrategyVault } from "@/hooks/useStrategyVault";
 import { useWallet } from "@/hooks/useWallet";
+import { usePaymentStream } from "@/hooks/usePaymentStream";
+import { StreamIndicator } from "@/components/builder/StreamIndicator";
 import type { Strategy, StrategyPerformance } from "@/types";
 
 type DetailTab = "overview" | "logs" | "backtest";
@@ -111,6 +113,19 @@ export default function StrategyDetailPage() {
     strategy?.status ?? "draft",
     30000
   );
+
+  // Payment stream for backtest
+  const paymentStream = usePaymentStream();
+
+  // Start a backtest payment stream when we enter the backtest tab
+  const handleBacktestTickPayment = useCallback(async (amount: number) => {
+    if (!wallet.address) return;
+    if (!paymentStream.stream) {
+      // Auto-start stream for backtest
+      await paymentStream.startStream(id, wallet.address, 2000, wallet.signAndSendTransaction);
+    }
+    paymentStream.recordTick(amount);
+  }, [wallet.address, wallet.signAndSendTransaction, paymentStream, id]);
 
   // Backtest canvas: highlight tracks real server-side execution
   const [btHighlightNode, setBtHighlightNode] = useState<string | null>(null);
@@ -380,12 +395,17 @@ export default function StrategyDetailPage() {
                   </ReactFlowProvider>
                 </div>
               )}
+              {/* Payment stream indicator */}
+              {paymentStream.stream && (
+                <StreamIndicator stream={paymentStream.stream} walletBalance={wallet.balance} />
+              )}
               <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
                 <BacktestPanel
                   strategyId={id}
                   nodes={vaultEntry?.nodes}
                   connections={vaultEntry?.connections}
                   onNodeHighlight={handleNodeHighlight}
+                  onTickPayment={handleBacktestTickPayment}
                 />
               </div>
             </div>

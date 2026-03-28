@@ -58,14 +58,14 @@ export async function uploadToZeroG(
     const [tree, treeErr] = await zgFile.merkleTree();
     if (treeErr) throw new Error(`Merkle tree: ${treeErr}`);
 
-    const rootHash: string = tree!.rootHash();
+    const rootHash: string = tree!.rootHash() ?? "";
 
     const indexer = new Indexer(ZG_INDEXER_RPC);
     const [, uploadErr] = await indexer.upload(
       zgFile,
       ZG_EVM_RPC,
-      signer,
-      ZG_FLOW_ADDRESS
+      signer as any,
+      ZG_FLOW_ADDRESS as any
     );
     if (uploadErr) throw new Error(`Upload: ${uploadErr}`);
 
@@ -99,7 +99,8 @@ export async function downloadFromZeroG(
     const { Indexer } = await import("@0glabs/0g-ts-sdk");
 
     const indexer = new Indexer(ZG_INDEXER_RPC);
-    const [err] = await indexer.download(rootHash, tmpPath, true);
+    const dlResult = await indexer.download(rootHash, tmpPath, true);
+    const err = Array.isArray(dlResult) ? dlResult[0] : dlResult;
     if (err) throw new Error(`Download: ${err}`);
 
     return readFileSync(tmpPath, "utf-8");
