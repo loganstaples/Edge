@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Providers } from "@/components/Providers";
 import "./globals.css";
 export const metadata: Metadata = {
   title: "EDGE — Prediction Market Strategy Builder",
@@ -17,7 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased min-h-screen bg-edge-bg text-edge-text">
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

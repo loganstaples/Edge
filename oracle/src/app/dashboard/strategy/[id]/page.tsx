@@ -71,17 +71,14 @@ export default function StrategyDetailPage() {
   const vault = useStrategyVault();
   const wallet = useWallet();
 
-  // Unlock vault on wallet connect
   useEffect(() => {
-    if (wallet.isConnected && wallet.address && !vault.isUnlocked && !vault.isUnlocking) {
-      vault.unlock(wallet.address, wallet.signMessage);
+    const headers: Record<string, string> = {};
+    if (wallet.address) {
+      headers["X-Wallet-Address"] = wallet.address;
     }
-  }, [wallet.isConnected, wallet.address, vault.isUnlocked, vault.isUnlocking]);
-
-  useEffect(() => {
     Promise.all([
-      fetch(`/api/strategies/${id}`).then((r) => (r.ok ? r.json() : null)),
-      fetch("/api/strategies").then((r) => (r.ok ? r.json() : [])),
+      fetch(`/api/strategies/${id}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/strategies", { headers }).then((r) => (r.ok ? r.json() : [])),
     ])
       .then(([strat, all]) => {
         setStrategy(strat);
@@ -90,7 +87,7 @@ export default function StrategyDetailPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, wallet.address]);
 
   // Merge vault-decrypted nodes into strategy
   const vaultEntry = vault.get(id);
