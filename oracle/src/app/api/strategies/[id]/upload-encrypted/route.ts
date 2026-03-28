@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { initializeDatabase } from "@/lib/db/schema";
-import { getStrategy, updateStrategy } from "@/lib/db/queries";
+import { getStrategy, updateStrategy, clearPlaintextNodes } from "@/lib/db/queries";
 import { uploadToZeroG } from "@/lib/storage/zg-client";
 
 let initialized = false;
@@ -40,6 +40,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // Store encrypted data in DB
   updateStrategy(id, { encryptedData });
+  // Clear plaintext nodes/connections — encrypted blob is now the only copy
+  clearPlaintextNodes(id);
 
   // Upload to 0G Storage (best-effort — works even if 0G is not configured)
   const zgRootHash = await uploadToZeroG(encryptedData);
