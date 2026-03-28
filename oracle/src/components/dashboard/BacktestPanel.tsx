@@ -63,6 +63,8 @@ interface BacktestResult {
 
 interface Props {
   strategyId: string;
+  nodes?: any[];
+  connections?: any[];
 }
 
 type Tab = "equity" | "trades" | "markets";
@@ -75,7 +77,7 @@ const PERIOD_LABELS: Record<Period, string> = {
   "1m": "1 month",
 };
 
-export function BacktestPanel({ strategyId }: Props) {
+export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections }: Props) {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +92,12 @@ export function BacktestPanel({ strategyId }: Props) {
       const res = await fetch(`/api/strategies/${strategyId}/backtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticks, startingCapital: 1000, period }),
+        body: JSON.stringify({
+          ticks,
+          startingCapital: 1000,
+          period,
+          ...(propNodes && propNodes.length > 0 ? { nodes: propNodes, connections: propConnections } : {}),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -104,7 +111,7 @@ export function BacktestPanel({ strategyId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [strategyId, ticks, period]);
+  }, [strategyId, ticks, period, propNodes, propConnections]);
 
   // --- Launch UI ---
   if (!result && !loading) {
