@@ -32,7 +32,7 @@ import { usePaymentStream } from "@/hooks/usePaymentStream";
 import { MiniActivityFeed } from "./MiniActivityFeed";
 import { PaymentModal } from "./PaymentModal";
 import { StreamIndicator } from "./StreamIndicator";
-import { TICK_COST_USDC } from "@/lib/payments/streams";
+import { TICK_COST_USDC } from "@/lib/payments/constants";
 
 type StrategyStatus = "draft" | "running" | "paused" | "stopped";
 
@@ -364,7 +364,14 @@ function CanvasInner() {
     // Mint NFT for new strategies
     if (isNew && wallet.address) {
       try {
-        await mintNft(id, wallet.address, wallet.signAndSendTransaction);
+        const phantom = (window as any).phantom?.solana;
+        if (phantom) {
+          await mintNft(id, wallet.address, strategyName, {
+            publicKey: phantom.publicKey,
+            signTransaction: (tx: any) => phantom.signTransaction(tx),
+            signAllTransactions: (txs: any) => phantom.signAllTransactions(txs),
+          });
+        }
       } catch (err: any) {
         console.warn("NFT minting skipped:", err.message);
       }

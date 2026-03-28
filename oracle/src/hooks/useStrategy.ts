@@ -5,7 +5,6 @@ import type { Node, Edge } from "@xyflow/react";
 import { NODE_TYPES } from "@/lib/strategy/node-types";
 import { mintStrategyNft } from "@/lib/nft/mint";
 import { deriveEncryptionKey, encryptStrategy, decryptStrategy } from "@/lib/encryption/strategy-cipher";
-import type { Transaction } from "@solana/web3.js";
 
 // Convert React Flow nodes/edges to our DB format
 function serializeNodes(nodes: Node[]): StrategyNode[] {
@@ -153,13 +152,17 @@ export function useStrategy() {
   const mintNft = useCallback(async (
     strategyId: string,
     walletAddress: string,
-    signAndSendTransaction: (tx: Transaction) => Promise<{ signature: string }>,
+    strategyName: string,
+    walletAdapter: {
+      publicKey: { toBytes(): Uint8Array };
+      signTransaction: <T>(tx: T) => Promise<T>;
+      signAllTransactions?: <T>(txs: T[]) => Promise<T[]>;
+    },
   ): Promise<string> => {
     setIsMinting(true);
     try {
-      const result = await mintStrategyNft(walletAddress, signAndSendTransaction);
+      const result = await mintStrategyNft(strategyId, walletAddress, strategyName, walletAdapter);
 
-      // Store the NFT mint address on the strategy
       await fetch(`/api/strategies/${strategyId}`, {
         method: "PUT",
         headers: authHeaders(walletAddress),
