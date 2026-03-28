@@ -230,6 +230,14 @@ export function updateStrategy(id: string, updates: {
   db.prepare(`UPDATE strategies SET ${fields.join(", ")} WHERE id = ?`).run(...values);
 }
 
+/** Clear plaintext nodes/connections after encryption is stored */
+export function clearPlaintextNodes(id: string): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE strategies SET nodes = '[]', connections = '[]', updated_at = datetime('now') WHERE id = ?"
+  ).run(id);
+}
+
 /** Check if a wallet owns a strategy */
 export function isStrategyOwner(strategyId: string, walletAddress: string | null): boolean {
   if (!walletAddress) return false;
