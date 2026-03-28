@@ -377,7 +377,19 @@ function CanvasInner() {
       try {
         const phantom = (window as any).phantom?.solana;
         if (phantom) {
-          await mintNft(id, wallet.address, strategyName, {
+          // Fetch the AI-generated description (may have been created during save)
+          let description = "";
+          try {
+            const descRes = await fetch(`/api/strategies/${id}`, {
+              headers: { "Content-Type": "application/json", "X-Wallet-Address": wallet.address },
+            });
+            if (descRes.ok) {
+              const strat = await descRes.json();
+              description = strat.description || "";
+            }
+          } catch {}
+
+          await mintNft(id, wallet.address, strategyName, description, {
             publicKey: phantom.publicKey,
             signTransaction: (tx: any) => phantom.signTransaction(tx),
             signAllTransactions: (txs: any) => phantom.signAllTransactions(txs),

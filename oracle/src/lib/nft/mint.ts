@@ -26,6 +26,7 @@ export async function mintStrategyNft(
   strategyId: string,
   ownerAddress: string,
   strategyName: string,
+  description: string,
   walletAdapter: {
     publicKey: { toBytes(): Uint8Array };
     signTransaction: <T>(tx: T) => Promise<T>;
@@ -33,19 +34,42 @@ export async function mintStrategyNft(
   },
 ): Promise<MintResult> {
   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
-  const metadataUri = `${origin}/api/strategies/${strategyId}/metadata.json`;
+
+  // Build off-chain metadata JSON and encode as data URI so Phantom can
+  // always read it (even on localhost / devnet with no public server).
+  const metadataJson = {
+    name: strategyName.slice(0, 32),
+    symbol: "EDGE",
+    description: description || `Trading strategy built on EDGE`,
+    image: `${origin}/api/strategies/${strategyId}/og-image`,
+    external_url: `${origin}/?id=${strategyId}`,
+    attributes: [
+      { trait_type: "Strategy ID", value: strategyId },
+      { trait_type: "Platform", value: "EDGE" },
+    ],
+    properties: {
+      category: "strategy",
+      files: [],
+    },
+  };
+  const metadataUri = `data:application/json;base64,${btoa(JSON.stringify(metadataJson))}`;
 
   const umi = createUmi(RPC_URL).use(mplTokenMetadata());
   umi.use(walletAdapterIdentity(walletAdapter));
 
   const mint = generateSigner(umi);
 
+  // Each strategy is a standalone NFT, not part of a collection.
+  // Use a unique symbol per mint to prevent Phantom from auto-grouping.
+  const uniqueSymbol = `EDGE`;
+
   const { signature } = await createNft(umi, {
     mint,
     name: strategyName.slice(0, 32),
-    symbol: "EDGE",
+    symbol: uniqueSymbol,
     uri: metadataUri,
     sellerFeeBasisPoints: percentAmount(0),
+    isCollection: false,
     creators: [
       {
         address: umiPublicKey(ownerAddress),
