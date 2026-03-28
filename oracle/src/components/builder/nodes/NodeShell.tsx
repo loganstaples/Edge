@@ -79,14 +79,14 @@ function NodeShellComponent({ id: _id, type, selected, status, flash, isActive, 
         ${selected ? "ring-2 ring-accent-blue/60 ring-offset-1 ring-offset-edge-bg" : ""}
       `}
       style={{
-        background: `linear-gradient(145deg, rgba(10, 10, 12, 0.97) 0%, rgba(14, 14, 16, 0.95) 100%)`,
+        background: `linear-gradient(145deg, rgba(2, 2, 3, 0.98) 0%, rgba(5, 5, 7, 0.97) 100%)`,
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
         border: flashActive
-          ? `1.5px solid ${flashColor}`
+          ? `2px solid ${flashColor}`
           : isActive
-            ? `1.5px solid rgba(255, 255, 255, 0.45)`
-            : `1.5px solid rgba(255, 255, 255, 0.13)`,
+            ? `2px solid rgba(255, 255, 255, 0.7)`
+            : `2px solid rgba(255, 255, 255, 0.45)`,
         boxShadow: flashActive
           ? flashShadow
           : isActive
