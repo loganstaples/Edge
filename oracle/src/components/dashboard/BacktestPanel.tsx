@@ -39,6 +39,8 @@ interface BacktestTick {
   tradesThisTick: number;
   marketsScanned: number;
   narrations?: TickNarration[];
+  activeNodeIds?: string[];
+  nodeOutputs?: Record<string, Record<string, any>>;
 }
 
 interface BacktestMetrics {
@@ -70,6 +72,8 @@ interface Props {
   strategyId: string;
   nodes?: any[];
   connections?: any[];
+  /** Called on each tick with the set of active node IDs and their outputs */
+  onTickNodeState?: (activeNodeIds: string[], nodeOutputs: Record<string, Record<string, any>>) => void;
 }
 
 type Tab = "equity" | "trades" | "markets" | "log";
@@ -106,7 +110,7 @@ function makeEmptyResult(strategyId: string, ticks: number, period: string, star
   };
 }
 
-export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections }: Props) {
+export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onTickNodeState }: Props) {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -195,10 +199,19 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
             } else {
               setCurrentNarration(null);
             }
+            // Notify parent of active node state for canvas highlighting
+            if (onTickNodeState && latestTick) {
+              onTickNodeState(
+                latestTick.activeNodeIds ?? [],
+                latestTick.nodeOutputs ?? {},
+              );
+            }
           } else if (event.type === "done") {
             setResult(event.data);
             setProgress(1);
             setBacktestDone(true);
+            // Clear node highlights when done
+            onTickNodeState?.([], {});
           } else if (event.type === "error") {
             setResult(null);
             throw new Error(event.error);
@@ -214,7 +227,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
       setStreamPhase(null);
       abortRef.current = null;
     }
-  }, [strategyId, ticks, period, speed, propNodes, propConnections]);
+  }, [strategyId, ticks, period, speed, propNodes, propConnections, onTickNodeState]);
 
   // --- Launch UI ---
   if (!result && !loading) {

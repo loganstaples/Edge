@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -25,13 +25,24 @@ const statusStyles: Record<string, { label: string; badgeClass: string; glow: st
   stopped: { label: "Stopped", badgeClass: "text-accent-red border-accent-red/30", glow: "none" },
 };
 
-function StrategyCanvas({ strategy, nodeStatuses }: { strategy: Strategy; nodeStatuses: Record<string, string> }) {
+function StrategyCanvas({ strategy, nodeStatuses, activeNodeIds, nodeOutputs, animateEdges }: {
+  strategy: Strategy;
+  nodeStatuses: Record<string, string>;
+  activeNodeIds?: Set<string>;
+  nodeOutputs?: Record<string, Record<string, any>>;
+  animateEdges?: boolean;
+}) {
   const nodes = useMemo(() => strategy.nodes.map((n) => ({
     id: n.id,
     type: n.type,
     position: n.position,
-    data: { config: n.config, status: nodeStatuses[n.id] ?? "idle" },
-  })), [strategy.nodes, nodeStatuses]);
+    data: {
+      config: n.config,
+      status: nodeStatuses[n.id] ?? "idle",
+      isActive: activeNodeIds?.has(n.id) ?? false,
+      lastOutput: nodeOutputs?.[n.id],
+    },
+  })), [strategy.nodes, nodeStatuses, activeNodeIds, nodeOutputs]);
 
   const edges = useMemo(() => strategy.connections.map((c) => ({
     id: c.id,
@@ -39,9 +50,9 @@ function StrategyCanvas({ strategy, nodeStatuses }: { strategy: Strategy; nodeSt
     target: c.target_id,
     sourceHandle: c.source_handle,
     targetHandle: c.target_handle,
-    animated: strategy.status === "running",
+    animated: animateEdges ?? strategy.status === "running",
     style: { stroke: "#3a3f55" },
-  })), [strategy.connections, strategy.status]);
+  })), [strategy.connections, strategy.status, animateEdges]);
 
   return (
     <ReactFlow
@@ -102,6 +113,23 @@ export default function StrategyDetailPage() {
     strategy?.status ?? "draft",
     30000
   );
+
+  // Backtest canvas node highlighting state
+  const [btActiveNodeIds, setBtActiveNodeIds] = useState<Set<string>>(new Set());
+  const [btNodeOutputs, setBtNodeOutputs] = useState<Record<string, Record<string, any>>>({});
+  const btClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTickNodeState = useCallback((activeIds: string[], outputs: Record<string, Record<string, any>>) => {
+    setBtActiveNodeIds(new Set(activeIds));
+    setBtNodeOutputs(outputs);
+    // Auto-clear the glow after 800ms so nodes pulse per tick
+    if (btClearTimerRef.current) clearTimeout(btClearTimerRef.current);
+    if (activeIds.length > 0) {
+      btClearTimerRef.current = setTimeout(() => {
+        setBtActiveNodeIds(new Set());
+      }, 800);
+    }
+  }, []);
 
   const handleAction = async (action: "deploy" | "pause" | "stop") => {
     setActionLoading(true);
@@ -346,8 +374,33 @@ export default function StrategyDetailPage() {
           )}
 
           {tab === "backtest" && (
-            <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
-              <BacktestPanel strategyId={id} nodes={vaultEntry?.nodes} connections={vaultEntry?.connections} />
+            <div className="space-y-4">
+              {/* Live strategy canvas with node highlighting during backtest */}
+              {strategyWithNodes && strategyWithNodes.nodes.length > 0 && (
+                <div
+                  className="glass relative overflow-hidden rounded-lg"
+                  style={{ height: "340px" }}
+                >
+                  <div className="gradient-top-edge" />
+                  <ReactFlowProvider>
+                    <StrategyCanvas
+                      strategy={strategyWithNodes}
+                      nodeStatuses={nodeStatuses}
+                      activeNodeIds={btActiveNodeIds}
+                      nodeOutputs={btNodeOutputs}
+                      animateEdges={btActiveNodeIds.size > 0}
+                    />
+                  </ReactFlowProvider>
+                </div>
+              )}
+              <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
+                <BacktestPanel
+                  strategyId={id}
+                  nodes={vaultEntry?.nodes}
+                  connections={vaultEntry?.connections}
+                  onTickNodeState={handleTickNodeState}
+                />
+              </div>
             </div>
           )}
         </motion.div>
