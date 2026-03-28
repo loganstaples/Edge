@@ -9,14 +9,8 @@
 
 import { getDb } from "@/lib/db";
 import { v4 as uuid } from "uuid";
-
-// --- Pricing ---
-/** Cost per execution tick in USDC */
-export const TICK_COST_USDC = 0.001;
-/** Cost per backtest tick in USDC */
-export const BACKTEST_TICK_COST_USDC = 0.0005;
-/** Minimum wallet balance to start a stream */
-export const MIN_BALANCE_USDC = 0.50;
+export { TICK_COST_USDC, BACKTEST_TICK_COST_USDC, MIN_BALANCE_USDC } from "./constants";
+import { TICK_COST_USDC } from "./constants";
 
 /** Flow rate in USDC/second for a given polling interval */
 export function flowRateForInterval(pollingIntervalMs: number): string {

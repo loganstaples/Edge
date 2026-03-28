@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TICK_COST_USDC, MIN_BALANCE_USDC } from "@/lib/payments/streams";
+import { TICK_COST_USDC, MIN_BALANCE_USDC } from "@/lib/payments/constants";
 
 interface PaymentModalProps {
   isOpen: boolean;
