@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   AreaChart,
   Area,
@@ -11,6 +11,10 @@ import {
   ReferenceLine,
   CartesianGrid,
 } from "recharts";
+import { TickNarrationBanner } from "./TickNarrationBanner";
+import { ExecutionStepLog } from "./ExecutionStepLog";
+import { BacktestSummaryCard } from "./BacktestSummaryCard";
+import type { TickNarration } from "@/lib/engine/backtester";
 
 interface BacktestTrade {
   tick: number;
@@ -34,6 +38,7 @@ interface BacktestTick {
   drawdown: number;
   tradesThisTick: number;
   marketsScanned: number;
+  narrations?: TickNarration[];
 }
 
 interface BacktestMetrics {
@@ -67,8 +72,15 @@ interface Props {
   connections?: any[];
 }
 
-type Tab = "equity" | "trades" | "markets";
+type Tab = "equity" | "trades" | "markets" | "log";
 type Period = "1d" | "1w" | "2w" | "1m";
+type Speed = "slow" | "normal" | "fast";
+
+const SPEED_LABELS: Record<Speed, string> = {
+  slow: "Slow (2s)",
+  normal: "Normal",
+  fast: "Fast",
+};
 
 const PERIOD_LABELS: Record<Period, string> = {
   "1d": "24 hours",
@@ -77,6 +89,23 @@ const PERIOD_LABELS: Record<Period, string> = {
   "1m": "1 month",
 };
 
+function makeEmptyResult(strategyId: string, ticks: number, period: string, startingCapital: number): BacktestResult {
+  return {
+    strategyId,
+    strategyName: "",
+    config: { ticks, startingCapital, period },
+    ticks: [],
+    trades: [],
+    marketsUsed: [],
+    metrics: {
+      totalReturn: 0, totalReturnPct: 0, totalTrades: 0,
+      winningTrades: 0, losingTrades: 0, winRate: 0,
+      sharpeRatio: 0, maxDrawdown: 0, maxDrawdownPct: 0,
+      avgTradeReturn: 0, profitFactor: 0, finalEquity: startingCapital,
+    },
+  };
+}
+
 export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections }: Props) {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,10 +113,31 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
   const [tab, setTab] = useState<Tab>("equity");
   const [period, setPeriod] = useState<Period>("1w");
   const [ticks, setTicks] = useState(60);
+  const [speed, setSpeed] = useState<Speed>("normal");
+  const [streamPhase, setStreamPhase] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [currentNarration, setCurrentNarration] = useState<TickNarration | null>(null);
+  const [currentTick, setCurrentTick] = useState(0);
+  const [totalTicks, setTotalTicks] = useState(0);
+  const [backtestDone, setBacktestDone] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const runBacktest = useCallback(async () => {
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+
     setLoading(true);
     setError(null);
+    setStreamPhase("Connecting...");
+    setProgress(0);
+    setCurrentNarration(null);
+    setCurrentTick(0);
+    setTotalTicks(ticks);
+    setBacktestDone(false);
+    setResult(makeEmptyResult(strategyId, ticks, period, 1000));
+    setTab("equity");
+
     try {
       const res = await fetch(`/api/strategies/${strategyId}/backtest`, {
         method: "POST",
@@ -96,22 +146,75 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
           ticks,
           startingCapital: 1000,
           period,
+          speed,
           ...(propNodes && propNodes.length > 0 ? { nodes: propNodes, connections: propConnections } : {}),
         }),
+        signal: abort.signal,
       });
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Backtest failed");
       }
-      const data = await res.json();
-      setResult(data);
-      setTab("equity");
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop()!;
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event: any;
+          try { event = JSON.parse(line); } catch { continue; }
+
+          if (event.type === "setup") {
+            setStreamPhase(event.message);
+          } else if (event.type === "tick") {
+            setResult(event.data);
+            setProgress((event.tick + 1) / event.totalTicks);
+            setStreamPhase(`Tick ${event.tick + 1} / ${event.totalTicks}`);
+            setCurrentTick(event.tick);
+            setTotalTicks(event.totalTicks);
+            // Extract narration from the latest tick
+            const latestTick = event.data?.ticks?.[event.data.ticks.length - 1];
+            if (latestTick?.narrations?.length > 0) {
+              // Pick the best narration: prefer one with a trade, then highest edge
+              const narrs = latestTick.narrations as TickNarration[];
+              const best = narrs.find((n: TickNarration) => n.tradeAction)
+                ?? narrs.reduce((a: TickNarration, b: TickNarration) =>
+                  Math.abs(b.edgePct ?? 0) > Math.abs(a.edgePct ?? 0) ? b : a);
+              setCurrentNarration(best);
+            } else {
+              setCurrentNarration(null);
+            }
+          } else if (event.type === "done") {
+            setResult(event.data);
+            setProgress(1);
+            setBacktestDone(true);
+          } else if (event.type === "error") {
+            setResult(null);
+            throw new Error(event.error);
+          }
+        }
+      }
     } catch (e) {
+      if ((e as Error).name === "AbortError") return;
       setError(e instanceof Error ? e.message : String(e));
+      if (!result?.ticks?.length) setResult(null);
     } finally {
       setLoading(false);
+      setStreamPhase(null);
+      abortRef.current = null;
     }
-  }, [strategyId, ticks, period, propNodes, propConnections]);
+  }, [strategyId, ticks, period, speed, propNodes, propConnections]);
 
   // --- Launch UI ---
   if (!result && !loading) {
@@ -146,6 +249,28 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
           />
         </div>
 
+        {/* Speed control */}
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] uppercase tracking-widest text-edge-muted font-semibold mr-2">Speed</span>
+          {(["slow", "normal", "fast"] as Speed[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSpeed(s)}
+              className={`px-3 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                speed === s
+                  ? "bg-white/[0.08] text-accent-cyan"
+                  : "text-edge-muted hover:text-edge-text hover:bg-white/[0.03]"
+              }`}
+              style={speed === s ? {
+                border: "1px solid rgba(34, 211, 238, 0.2)",
+                boxShadow: "0 0 8px rgba(34, 211, 238, 0.06)",
+              } : { border: "1px solid transparent" }}
+            >
+              {SPEED_LABELS[s]}
+            </button>
+          ))}
+        </div>
+
         <button
           onClick={runBacktest}
           className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-lg text-accent-cyan transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
@@ -166,23 +291,6 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
     );
   }
 
-  // --- Loading state ---
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-12">
-        <div className="w-5 h-5 border-2 border-accent-cyan/30 border-t-accent-cyan rounded-full animate-spin" />
-        <div className="text-center space-y-1">
-          <span className="text-xs text-edge-text block">
-            Fetching real market data & running AI analysis...
-          </span>
-          <span className="text-[10px] text-edge-muted block">
-            {ticks} ticks over {PERIOD_LABELS[period]} — this may take 15-30s
-          </span>
-        </div>
-      </div>
-    );
-  }
-
   if (!result) return null;
 
   const { metrics, ticks: tickData, trades, marketsUsed } = result;
@@ -198,57 +306,123 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
     equity: t.equity,
   }));
 
+  // Build execution log entries from tick data
+  const logEntries = tickData
+    .filter((t) => t.narrations && t.narrations.length > 0)
+    .map((t) => ({
+      tick: t.tick,
+      timestamp: t.timestamp,
+      narrations: t.narrations!,
+      tradesThisTick: t.tradesThisTick,
+    }));
+
+  // Compute average edge at entry for trades that had narrations
+  const edgesAtEntry: number[] = [];
+  for (const t of tickData) {
+    if (t.tradesThisTick > 0 && t.narrations) {
+      for (const n of t.narrations) {
+        if (n.tradeAction && n.edgePct != null) edgesAtEntry.push(n.edgePct);
+      }
+    }
+  }
+  const avgEntryEdge = edgesAtEntry.length > 0
+    ? edgesAtEntry.reduce((a, b) => a + b, 0) / edgesAtEntry.length
+    : null;
+
   return (
     <div className="space-y-4">
-      {/* Period & markets badge */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[9px] uppercase tracking-widest text-edge-dim px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.04]">
-          {PERIOD_LABELS[result.config.period as Period] ?? result.config.period} · {result.config.ticks} ticks
-        </span>
-        <span className="text-[9px] uppercase tracking-widest text-edge-dim px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.04]">
-          {marketsUsed.length} real market{marketsUsed.length !== 1 ? "s" : ""}
-        </span>
-      </div>
+      {/* Summary card — shown when backtest is complete */}
+      {backtestDone && !loading && (
+        <BacktestSummaryCard
+          metrics={metrics}
+          trades={trades}
+          totalTicks={result.config.ticks}
+          startingCapital={result.config.startingCapital}
+          avgEntryEdge={avgEntryEdge}
+        />
+      )}
 
-      {/* Metrics bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-        <MetricCard
-          label="Total Return"
-          value={`${isPositive ? "+" : ""}$${metrics.totalReturn.toFixed(2)}`}
-          sub={`${isPositive ? "+" : ""}${metrics.totalReturnPct.toFixed(1)}%`}
-          color={isPositive ? "green" : "red"}
+      {/* Live narration banner — shown during streaming */}
+      {loading && progress > 0 && (
+        <TickNarrationBanner
+          tick={currentTick}
+          totalTicks={totalTicks}
+          narration={currentNarration}
         />
-        <MetricCard
-          label="Win Rate"
-          value={`${metrics.winRate.toFixed(1)}%`}
-          sub={`${metrics.winningTrades}W / ${metrics.losingTrades}L`}
-          color={metrics.winRate >= 50 ? "green" : "amber"}
-        />
-        <MetricCard
-          label="Sharpe Ratio"
-          value={metrics.sharpeRatio.toFixed(2)}
-          sub={metrics.sharpeRatio > 1 ? "Good" : metrics.sharpeRatio > 0.5 ? "Fair" : "Poor"}
-          color={metrics.sharpeRatio > 1 ? "green" : metrics.sharpeRatio > 0 ? "amber" : "red"}
-        />
-        <MetricCard
-          label="Max Drawdown"
-          value={`$${metrics.maxDrawdown.toFixed(2)}`}
-          sub={`${metrics.maxDrawdownPct.toFixed(1)}%`}
-          color={metrics.maxDrawdownPct < 10 ? "green" : metrics.maxDrawdownPct < 25 ? "amber" : "red"}
-        />
-        <MetricCard
-          label="Total Trades"
-          value={String(metrics.totalTrades)}
-          sub={`Avg $${metrics.avgTradeReturn.toFixed(2)}`}
-          color="blue"
-        />
-        <MetricCard
-          label="Profit Factor"
-          value={metrics.profitFactor === Infinity ? "∞" : metrics.profitFactor.toFixed(2)}
-          sub={metrics.profitFactor > 1.5 ? "Strong" : metrics.profitFactor > 1 ? "Positive" : "Negative"}
-          color={metrics.profitFactor > 1.5 ? "green" : metrics.profitFactor > 1 ? "amber" : "red"}
-        />
-      </div>
+      )}
+
+      {/* Streaming progress bar */}
+      {loading && (
+        <div className="flex items-center gap-3">
+          <div className="w-3.5 h-3.5 border-2 border-accent-cyan/30 border-t-accent-cyan rounded-full animate-spin shrink-0" />
+          <span className="text-[10px] text-edge-muted whitespace-nowrap">
+            {streamPhase || "Running..."}
+          </span>
+          <div className="flex-1 h-1 rounded-full bg-white/[0.04] overflow-hidden">
+            <div
+              className="h-full rounded-full bg-accent-cyan/50 transition-all duration-300 ease-out"
+              style={{ width: `${Math.max(progress * 100, 2)}%` }}
+            />
+          </div>
+          <span className="text-[10px] text-edge-dim font-mono tabular-nums">
+            {Math.round(progress * 100)}%
+          </span>
+        </div>
+      )}
+
+      {/* Period & markets badge */}
+      {!backtestDone && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] uppercase tracking-widest text-edge-dim px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.04]">
+            {PERIOD_LABELS[result.config.period as Period] ?? result.config.period} · {result.config.ticks} ticks
+          </span>
+          <span className="text-[9px] uppercase tracking-widest text-edge-dim px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.04]">
+            {marketsUsed.length} real market{marketsUsed.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+      )}
+
+      {/* Metrics bar — only when not showing summary card */}
+      {!backtestDone && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+          <MetricCard
+            label="Total Return"
+            value={`${isPositive ? "+" : ""}$${metrics.totalReturn.toFixed(2)}`}
+            sub={`${isPositive ? "+" : ""}${metrics.totalReturnPct.toFixed(1)}%`}
+            color={isPositive ? "green" : "red"}
+          />
+          <MetricCard
+            label="Win Rate"
+            value={`${metrics.winRate.toFixed(1)}%`}
+            sub={`${metrics.winningTrades}W / ${metrics.losingTrades}L`}
+            color={metrics.winRate >= 50 ? "green" : metrics.totalTrades === 0 ? "blue" : "amber"}
+          />
+          <MetricCard
+            label="Sharpe Ratio"
+            value={metrics.sharpeRatio.toFixed(2)}
+            sub={metrics.sharpeRatio > 1 ? "Good" : metrics.sharpeRatio > 0.5 ? "Fair" : "Poor"}
+            color={metrics.sharpeRatio > 1 ? "green" : metrics.sharpeRatio > 0 ? "amber" : "red"}
+          />
+          <MetricCard
+            label="Max Drawdown"
+            value={`$${metrics.maxDrawdown.toFixed(2)}`}
+            sub={`${metrics.maxDrawdownPct.toFixed(1)}%`}
+            color={metrics.maxDrawdownPct < 10 ? "green" : metrics.maxDrawdownPct < 25 ? "amber" : "red"}
+          />
+          <MetricCard
+            label="Total Trades"
+            value={String(metrics.totalTrades)}
+            sub={`Avg $${(metrics.avgTradeReturn ?? 0).toFixed(2)}`}
+            color="blue"
+          />
+          <MetricCard
+            label="Profit Factor"
+            value={metrics.profitFactor == null ? "N/A" : metrics.profitFactor === Infinity ? "∞" : metrics.profitFactor.toFixed(2)}
+            sub={metrics.profitFactor == null ? "—" : metrics.profitFactor > 1.5 ? "Strong" : metrics.profitFactor > 1 ? "Positive" : "Negative"}
+            color={metrics.profitFactor == null ? "gray" : metrics.profitFactor > 1.5 ? "green" : metrics.profitFactor > 1 ? "amber" : "red"}
+          />
+        </div>
+      )}
 
       {/* Tab switcher */}
       <div className="flex items-center gap-1">
@@ -258,24 +432,32 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
         <TabButton active={tab === "trades"} onClick={() => setTab("trades")}>
           Trades ({trades.length})
         </TabButton>
+        <TabButton active={tab === "log"} onClick={() => setTab("log")}>
+          Execution Log ({logEntries.length})
+        </TabButton>
         <TabButton active={tab === "markets"} onClick={() => setTab("markets")}>
           Markets ({marketsUsed.length})
         </TabButton>
         <div className="flex-1" />
-        <button
-          onClick={() => { setResult(null); setError(null); }}
-          className="text-[10px] text-edge-muted hover:text-accent-cyan transition-colors px-2 py-1"
-        >
-          New run
-        </button>
+        {!loading && (
+          <button
+            onClick={() => { setResult(null); setError(null); setBacktestDone(false); setCurrentNarration(null); }}
+            className="text-[10px] text-edge-muted hover:text-accent-cyan transition-colors px-2 py-1"
+          >
+            New run
+          </button>
+        )}
       </div>
 
       {/* Tab content */}
       {tab === "equity" && (
         <div className="h-56">
-          {metrics.totalTrades === 0 ? (
-            <div className="flex items-center justify-center h-full text-edge-muted text-xs">
-              No trades were triggered — strategy gates may have blocked all signals.
+          {chartData.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-edge-muted text-xs gap-2">
+              {loading && (
+                <div className="w-3.5 h-3.5 border-2 border-accent-cyan/30 border-t-accent-cyan rounded-full animate-spin" />
+              )}
+              {loading ? "Waiting for simulation data..." : "No trades were triggered — strategy gates may have blocked all signals."}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -322,6 +504,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
                   stroke={isPositive ? "#34d399" : "#f87171"}
                   strokeWidth={1.5}
                   fill={`url(#eqGrad-${strategyId})`}
+                  isAnimationActive={!loading}
                   animationDuration={800}
                 />
               </AreaChart>
@@ -333,7 +516,9 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
       {tab === "trades" && (
         <div className="overflow-x-auto max-h-56 overflow-y-auto">
           {trades.length === 0 ? (
-            <div className="text-center text-edge-muted text-xs py-8">No trades triggered.</div>
+            <div className="text-center text-edge-muted text-xs py-8">
+              {loading ? "Waiting for trades..." : "No trades triggered."}
+            </div>
           ) : (
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-[#0e1018]">
@@ -397,10 +582,16 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
         </div>
       )}
 
+      {tab === "log" && (
+        <ExecutionStepLog entries={logEntries} isStreaming={loading} />
+      )}
+
       {tab === "markets" && (
         <div className="overflow-y-auto max-h-56 space-y-1.5">
           {marketsUsed.length === 0 ? (
-            <div className="text-center text-edge-muted text-xs py-8">No markets discovered.</div>
+            <div className="text-center text-edge-muted text-xs py-8">
+              {loading ? "Discovering markets..." : "No markets discovered."}
+            </div>
           ) : (
             marketsUsed.map((m, i) => (
               <div

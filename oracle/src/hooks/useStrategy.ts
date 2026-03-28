@@ -83,13 +83,14 @@ export function useStrategy() {
       let strategyId: string;
 
       if (strategy?.id) {
-        // Update existing — only send public metadata (name), not nodes
+        // Update existing — send name + updated nodes/connections
         await fetch(`/api/strategies/${strategy.id}`, {
           method: "PUT",
           headers: authHeaders(walletAddress),
-          body: JSON.stringify({ name }),
+          body: JSON.stringify({ name, nodes: serializedNodes, connections: serializedEdges }),
         });
         strategyId = strategy.id;
+        setStrategy((s) => s ? { ...s, name, nodes: serializedNodes, connections: serializedEdges } : s);
       } else {
         // Create new — requires wallet
         if (!walletAddress) {
@@ -110,37 +111,55 @@ export function useStrategy() {
         }
         const data = await res.json();
         strategyId = data.id;
-        // Load the full strategy after creating
-        const fullRes = await fetch(`/api/strategies/${strategyId}`, {
-          headers: authHeaders(walletAddress),
+        // Set strategy state from data we already have — avoids an extra
+        // GET request that would add latency before the NFT mint popup.
+        const now = new Date().toISOString();
+        setStrategy({
+          id: strategyId,
+          name,
+          description: "",
+          authorName: "",
+          ownerWallet: walletAddress,
+          nftMint: null,
+          encryptedData: null,
+          zgRootHash: null,
+          nodes: serializedNodes,
+          connections: serializedEdges,
+          status: "draft",
+          isPublic: false,
+          createdAt: now,
+          updatedAt: now,
         });
-        const full = await fullRes.json();
-        setStrategy(full);
       }
 
-      // Generate AI description (non-blocking — runs while encryption happens)
-      const descriptionPromise = fetch(`/api/strategies/${strategyId}/generate-description`, {
+      // Generate AI description (non-blocking)
+      fetch(`/api/strategies/${strategyId}/generate-description`, {
         method: "POST",
         headers: authHeaders(walletAddress),
         body: JSON.stringify({ nodes: serializedNodes, connections: serializedEdges }),
-      }).catch(() => {}); // Best-effort, don't block save
+      }).catch(() => {});
 
-      // Encrypt and upload to 0G Storage
-      const key = encryptionKey || (signMessage ? await deriveEncryptionKey(signMessage) : null);
-      if (key && walletAddress) {
-        try {
-          const encrypted = await encryptStrategy(
-            { nodes: serializedNodes, connections: serializedEdges },
-            key
-          );
-          await fetch(`/api/strategies/${strategyId}/upload-encrypted`, {
-            method: "POST",
-            headers: authHeaders(walletAddress),
-            body: JSON.stringify({ encryptedData: encrypted }),
-          });
-        } catch (err: any) {
-          console.warn("Encryption/upload skipped:", err.message);
-        }
+      // Encrypt and upload to 0G Storage (non-blocking — must not delay
+      // save return, because the caller needs to trigger the NFT mint
+      // while the browser's user-gesture context is still alive).
+      if (walletAddress) {
+        (async () => {
+          try {
+            const key = encryptionKey || (signMessage ? await deriveEncryptionKey(signMessage) : null);
+            if (!key) return;
+            const encrypted = await encryptStrategy(
+              { nodes: serializedNodes, connections: serializedEdges },
+              key
+            );
+            await fetch(`/api/strategies/${strategyId}/upload-encrypted`, {
+              method: "POST",
+              headers: authHeaders(walletAddress),
+              body: JSON.stringify({ encryptedData: encrypted }),
+            });
+          } catch (err: any) {
+            console.warn("Encryption/upload skipped:", err.message);
+          }
+        })();
       }
 
       return strategyId;
@@ -185,6 +204,7 @@ export function useStrategy() {
     id: string,
     walletAddress?: string | null,
     signMessage?: (message: Uint8Array) => Promise<{ signature: Uint8Array }>,
+    encryptionKey?: CryptoKey | null,
   ): Promise<{ nodes: Node[]; edges: Edge[]; name: string; status: string } | null> => {
     const res = await fetch(`/api/strategies/${id}`, {
       headers: authHeaders(walletAddress),
@@ -193,17 +213,19 @@ export function useStrategy() {
     const data: Strategy = await res.json();
     setStrategy(data);
 
-    // If we have encrypted data and a signMessage function, decrypt client-side
-    if (data.encryptedData && signMessage) {
+    // If we have encrypted data, decrypt client-side
+    if (data.encryptedData) {
       try {
-        const key = await deriveEncryptionKey(signMessage);
-        const decrypted = await decryptStrategy(data.encryptedData, key);
-        return {
-          nodes: deserializeNodes(decrypted.nodes),
-          edges: deserializeEdges(decrypted.connections),
-          name: data.name,
-          status: data.status,
-        };
+        const key = encryptionKey || (signMessage ? await deriveEncryptionKey(signMessage) : null);
+        if (key) {
+          const decrypted = await decryptStrategy(data.encryptedData, key);
+          return {
+            nodes: deserializeNodes(decrypted.nodes),
+            edges: deserializeEdges(decrypted.connections),
+            name: data.name,
+            status: data.status,
+          };
+        }
       } catch (err: any) {
         console.warn("Decryption failed:", err.message);
         // Fall through to empty nodes

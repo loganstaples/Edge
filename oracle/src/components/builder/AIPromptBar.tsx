@@ -280,17 +280,20 @@ export function AIPromptBar({ onStrategyGenerated, onStreamStart, onStreamingNod
           if (event.type === "delta") {
             accumulated += event.text;
 
-            // Signal stream start on first delta
-            if (!streamStarted) {
-              streamStarted = true;
-              onStreamStart?.();
-            }
+            // Only stream nodes for new strategies, not updates
+            if (!hasExistingStrategy) {
+              // Signal stream start on first delta
+              if (!streamStarted) {
+                streamStarted = true;
+                onStreamStart?.();
+              }
 
-            // Extract newly completed nodes from the stream
-            const newNodes = extractNodesFromStream(accumulated, extractedCount);
-            if (newNodes.length > 0) {
-              extractedCount += newNodes.length;
-              onStreamingNodes?.(newNodes);
+              // Extract newly completed nodes from the stream
+              const newNodes = extractNodesFromStream(accumulated, extractedCount);
+              if (newNodes.length > 0) {
+                extractedCount += newNodes.length;
+                onStreamingNodes?.(newNodes);
+              }
             }
           } else if (event.type === "complete") {
             const { nodes, connections } = event.strategy;

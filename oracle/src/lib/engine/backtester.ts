@@ -38,6 +38,29 @@ export interface BacktestTrade {
   exitReason?: string;
 }
 
+export interface TickNarration {
+  headline?: string;
+  eventTitle?: string;
+  marketPrice?: number;
+  platform?: string;
+  sentimentScore?: number;
+  aiEstimate?: number;
+  aiConfidence?: string;
+  aiDirection?: string;
+  rawEdge?: number;
+  adjustedEdge?: number;
+  edgePct?: number;
+  sourceWeight?: number;
+  timeDecay?: number;
+  liquidityFactor?: number;
+  gateResult?: boolean;
+  gateDetails?: string;
+  tradeAction?: "BUY" | "SELL" | null;
+  tradeDirection?: "YES" | "NO";
+  tradeAmount?: number;
+  tradePrice?: number;
+}
+
 export interface BacktestTick {
   tick: number;
   timestamp: string;
@@ -45,6 +68,22 @@ export interface BacktestTick {
   drawdown: number;
   tradesThisTick: number;
   marketsScanned: number;
+  narrations?: TickNarration[];
+}
+
+export interface BacktestMetrics {
+  totalReturn: number;
+  totalReturnPct: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  maxDrawdownPct: number;
+  avgTradeReturn: number;
+  profitFactor: number;
+  finalEquity: number;
 }
 
 export interface BacktestResult {
@@ -54,19 +93,50 @@ export interface BacktestResult {
   ticks: BacktestTick[];
   trades: BacktestTrade[];
   marketsUsed: { id: string; title: string; platform: string }[];
-  metrics: {
-    totalReturn: number;
-    totalReturnPct: number;
-    totalTrades: number;
-    winningTrades: number;
-    losingTrades: number;
-    winRate: number;
-    sharpeRatio: number;
-    maxDrawdown: number;
-    maxDrawdownPct: number;
-    avgTradeReturn: number;
-    profitFactor: number;
-    finalEquity: number;
+  metrics: BacktestMetrics;
+}
+
+export type BacktestProgressEvent =
+  | { type: "setup"; message: string }
+  | { type: "tick"; tick: number; totalTicks: number; data: BacktestResult }
+  | { type: "done"; data: BacktestResult }
+  | { type: "error"; error: string };
+
+export type BacktestProgressCallback = (event: BacktestProgressEvent) => void | Promise<void>;
+
+function computeMetrics(
+  trades: BacktestTrade[],
+  equity: number,
+  startingCapital: number,
+  peak: number,
+  maxDD: number,
+): BacktestMetrics {
+  const wins = trades.filter((t) => t.pnl > 0);
+  const losses = trades.filter((t) => t.pnl < 0);
+  const totalReturn = equity - startingCapital;
+  const returns = trades.map((t) => t.pnl / (t.amount || 1));
+  let sharpe = 0;
+  if (returns.length >= 2) {
+    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1);
+    sharpe = variance === 0 ? 0 : mean / Math.sqrt(variance);
+  }
+  const grossProfit = wins.reduce((s, t) => s + t.pnl, 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+
+  return {
+    totalReturn: parseFloat(totalReturn.toFixed(2)),
+    totalReturnPct: parseFloat(((totalReturn / startingCapital) * 100).toFixed(2)),
+    totalTrades: trades.length,
+    winningTrades: wins.length,
+    losingTrades: losses.length,
+    winRate: trades.length > 0 ? parseFloat(((wins.length / trades.length) * 100).toFixed(1)) : 0,
+    sharpeRatio: parseFloat(sharpe.toFixed(3)),
+    maxDrawdown: parseFloat(maxDD.toFixed(2)),
+    maxDrawdownPct: peak > 0 ? parseFloat(((maxDD / peak) * 100).toFixed(2)) : 0,
+    avgTradeReturn: trades.length > 0 ? parseFloat((totalReturn / trades.length).toFixed(2)) : 0,
+    profitFactor: grossLoss === 0 ? (grossProfit > 0 ? Infinity : 0) : parseFloat((grossProfit / grossLoss).toFixed(2)),
+    finalEquity: parseFloat(equity.toFixed(2)),
   };
 }
 
@@ -701,6 +771,7 @@ async function _runReactiveSource(
 export async function runBacktest(
   strategy: Strategy,
   config: Partial<BacktestConfig> = {},
+  onProgress?: BacktestProgressCallback,
 ): Promise<BacktestResult> {
   // Clear per-run state caches (NOT aiCache — AI results are deterministic per input)
   for (const k of Object.keys(btHistoryBuffers)) delete btHistoryBuffers[k];
@@ -724,6 +795,7 @@ export async function runBacktest(
   const tickInterval = (endTs - startTs) / cfg.ticks;
 
   // --- Phase 1: Discover real markets & fetch historical prices ---
+  onProgress?.({ type: "setup", message: "Discovering markets & fetching prices..." });
   const sorted = topoSort(strategy.nodes, strategy.connections);
 
   // Distinguish standalone data sources (entry points with no upstream) from
@@ -845,6 +917,7 @@ export async function runBacktest(
   }
 
   // --- Phase 2: Pre-fetch AI estimates (cached, one call per unique event) ---
+  onProgress?.({ type: "setup", message: "Running AI analysis..." });
   // Identify which AI node types are in the graph
   const hasAIEstimate = downstream.some((n) => n.type === "ai_analyst" || n.type === "ai_estimate");
   const hasSentiment = downstream.some((n) => n.type === "sentiment_scanner" || n.type === "sentiment");
@@ -873,6 +946,7 @@ export async function runBacktest(
   }
 
   // --- Phase 3: Replay strategy tick-by-tick ---
+  onProgress?.({ type: "setup", message: "Simulating strategy..." });
   const allTrades: BacktestTrade[] = [];
   const tickData: BacktestTick[] = [];
   const openPositions: {
@@ -1225,6 +1299,7 @@ export async function runBacktest(
     // Track which markets have already been traded this tick to prevent duplicates
     // from multiple news articles pointing to the same market.
     const tradedThisTick = new Set<string>();
+    const tickNarrations: TickNarration[] = [];
 
     for (const river of rivers) {
       const outputMap: Record<string, Record<string, any>> = {};
@@ -1232,6 +1307,10 @@ export async function runBacktest(
       // Track blocked nodes — only downstream of blocked gates are affected,
       // not the entire pipeline (matches live executor behavior).
       const blockedNodes = new Set<string>();
+      let riverTradeAction: "BUY" | "SELL" | null = null;
+      let riverTradeDir: "YES" | "NO" | undefined;
+      let riverTradeAmt: number | undefined;
+      let riverTradePrice: number | undefined;
 
       for (const node of downstream) {
         if (blockedNodes.has(node.id)) continue;
@@ -1355,6 +1434,10 @@ export async function runBacktest(
             const tradeKey = `${tr.marketId}:${tr.action}`;
             if (currentPrice != null && !tradedThisTick.has(tradeKey)) {
               tradedThisTick.add(tradeKey);
+              riverTradeAction = tr.action === "sell" ? "SELL" : "BUY";
+              riverTradeDir = tr.direction;
+              riverTradeAmt = tr.amount;
+              riverTradePrice = currentPrice;
 
               if (tr.action === "sell") {
                 // Close open positions for this market
@@ -1415,6 +1498,46 @@ export async function runBacktest(
         if (!outputs._active_handle) delete accumulated._active_handle;
         outputMap[node.id] = accumulated;
       }
+
+      // --- Collect narration from this river's outputs ---
+      const narration: TickNarration = {
+        headline: river.headline,
+        eventTitle: river.event_title,
+        marketPrice: river.yes_price ?? river.contract_price ?? river.current_price,
+        platform: river.platform,
+      };
+      for (const [nid, out] of Object.entries(outputMap)) {
+        if (nid === "__source__") continue;
+        if (out.analyst_probability != null) {
+          narration.aiEstimate = out.analyst_probability;
+          narration.aiConfidence = out.analyst_confidence;
+          narration.aiDirection = out.analyst_direction;
+        }
+        if (out.scanner_sentiment_score != null) {
+          narration.sentimentScore = out.scanner_sentiment_score;
+        }
+        if (out.ec_edge_pct != null) {
+          narration.edgePct = out.ec_edge_pct;
+          narration.rawEdge = out.ec_raw_edge;
+          narration.adjustedEdge = out.ec_edge;
+          narration.sourceWeight = out.ec_source_weight;
+          narration.timeDecay = out.ec_time_decay;
+          narration.liquidityFactor = out.ec_liquidity_factor;
+        }
+        if (out._gate_result != null && narration.gateResult == null) {
+          narration.gateResult = out._gate_result;
+          narration.gateDetails = out._gate_details;
+        }
+      }
+      // Attach trade info from this river
+      narration.tradeAction = riverTradeAction;
+      narration.tradeDirection = riverTradeDir;
+      narration.tradeAmount = riverTradeAmt;
+      narration.tradePrice = riverTradePrice;
+      // Only include narrations that have at least some meaningful data
+      if (narration.aiEstimate != null || narration.edgePct != null || narration.eventTitle) {
+        tickNarrations.push(narration);
+      }
     }
 
     // --- Track equity including unrealized P&L on open positions ---
@@ -1439,7 +1562,26 @@ export async function runBacktest(
       drawdown: parseFloat(dd.toFixed(2)),
       tradesThisTick,
       marketsScanned,
+      narrations: tickNarrations.length > 0 ? tickNarrations : undefined,
     });
+
+    if (onProgress) {
+      const runningMetrics = computeMetrics(allTrades, totalEquity, cfg.startingCapital, peak, maxDD);
+      await onProgress({
+        type: "tick",
+        tick: t,
+        totalTicks: cfg.ticks,
+        data: {
+          strategyId: strategy.id,
+          strategyName: strategy.name,
+          config: cfg,
+          ticks: tickData,
+          trades: allTrades,
+          marketsUsed: allMarkets.map((m) => ({ id: m.marketId, title: m.eventTitle, platform: m.platform })),
+          metrics: runningMetrics,
+        },
+      });
+    }
   }
 
   // --- Close any remaining open positions at the final price ---
@@ -1468,40 +1610,19 @@ export async function runBacktest(
     equity += pnl;
   }
 
-  // --- Compute metrics ---
-  const wins = allTrades.filter((t) => t.pnl > 0);
-  const losses = allTrades.filter((t) => t.pnl <= 0);
-  const totalReturn = equity - cfg.startingCapital;
-  const returns = allTrades.map((t) => t.pnl / (t.amount || 1));
-  let sharpe = 0;
-  if (returns.length >= 2) {
-    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1);
-    sharpe = variance === 0 ? 0 : mean / Math.sqrt(variance);
-  }
-  const grossProfit = wins.reduce((s, t) => s + t.pnl, 0);
-  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+  // --- Compute final metrics ---
+  const finalMetrics = computeMetrics(allTrades, equity, cfg.startingCapital, peak, maxDD);
 
-  return {
+  const finalResult: BacktestResult = {
     strategyId: strategy.id,
     strategyName: strategy.name,
     config: cfg,
     ticks: tickData,
     trades: allTrades,
     marketsUsed: allMarkets.map((m) => ({ id: m.marketId, title: m.eventTitle, platform: m.platform })),
-    metrics: {
-      totalReturn: parseFloat(totalReturn.toFixed(2)),
-      totalReturnPct: parseFloat(((totalReturn / cfg.startingCapital) * 100).toFixed(2)),
-      totalTrades: allTrades.length,
-      winningTrades: wins.length,
-      losingTrades: losses.length,
-      winRate: allTrades.length > 0 ? parseFloat(((wins.length / allTrades.length) * 100).toFixed(1)) : 0,
-      sharpeRatio: parseFloat(sharpe.toFixed(3)),
-      maxDrawdown: parseFloat(maxDD.toFixed(2)),
-      maxDrawdownPct: peak > 0 ? parseFloat(((maxDD / peak) * 100).toFixed(2)) : 0,
-      avgTradeReturn: allTrades.length > 0 ? parseFloat((totalReturn / allTrades.length).toFixed(2)) : 0,
-      profitFactor: grossLoss === 0 ? (grossProfit > 0 ? Infinity : 0) : parseFloat((grossProfit / grossLoss).toFixed(2)),
-      finalEquity: parseFloat(equity.toFixed(2)),
-    },
+    metrics: finalMetrics,
   };
+
+  onProgress?.({ type: "done", data: finalResult });
+  return finalResult;
 }

@@ -25,7 +25,7 @@ import { AIPromptBar } from "./AIPromptBar";
 import { EmptyCanvas } from "./EmptyCanvas";
 import { DragFromPortMenu } from "./DragFromPortMenu";
 import { LiveStatsBar } from "./LiveStatsBar";
-import { useStrategy, serializeNodes, serializeEdges } from "@/hooks/useStrategy";
+import { useStrategy, serializeNodes, serializeEdges, deserializeNodes, deserializeEdges } from "@/hooks/useStrategy";
 import { useStrategyVault } from "@/hooks/useStrategyVault";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
 import { useWallet } from "@/hooks/useWallet";
@@ -122,24 +122,43 @@ function CanvasInner() {
     );
   }, [nodeStatuses, nodeOutputs, activeNodeIds, setNodes]);
 
-  // Load strategy from URL param on mount
+  // Load strategy from URL param — wait for wallet + vault to be ready
+  const loadedRef = useRef(false);
   useEffect(() => {
     const id = searchParams.get("id");
-    if (id) {
+    if (!id || loadedRef.current) return;
+
+    // Wait for wallet auto-reconnect and vault unlock
+    if (!wallet.address || !vault.isUnlocked) {
+      // Show loading state while waiting
       setStrategyLoading(true);
-      load(id, wallet.address, wallet.signMessage)
-        .then((result) => {
-          if (result) {
+      return;
+    }
+
+    loadedRef.current = true;
+    setStrategyLoading(true);
+
+    // Check vault for already-decrypted node data (avoids re-signing)
+    const vaultEntry = vault.get(id);
+
+    load(id, wallet.address, wallet.signMessage, vault.getKey())
+      .then((result) => {
+        if (result) {
+          // Prefer vault nodes (already decrypted, no extra signature)
+          if (vaultEntry) {
+            setNodes(deserializeNodes(vaultEntry.nodes));
+            setEdges(deserializeEdges(vaultEntry.connections));
+          } else {
             setNodes(result.nodes);
             setEdges(result.edges);
-            setStrategyName(result.name);
-            setStrategyStatus(result.status as StrategyStatus);
           }
-        })
-        .catch(() => {})
-        .finally(() => setStrategyLoading(false));
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+          setStrategyName(result.name);
+          setStrategyStatus(result.status as StrategyStatus);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setStrategyLoading(false));
+  }, [wallet.address, vault.isUnlocked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -319,6 +338,56 @@ function CanvasInner() {
     [portMenu, rfInstance, nodes, setNodes, setEdges]
   );
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSave = useCallback(async () => {
+    if (!wallet.isConnected || !wallet.address) {
+      wallet.connect();
+      return;
+    }
+
+    setSaveError(null);
+
+    try {
+      // Unlock vault if not already (derives encryption key)
+      if (!vault.isUnlocked) {
+        await vault.unlock(wallet.address, wallet.signMessage);
+      }
+
+      const isNew = !strategy?.id;
+      const id = await save(strategyName, nodes, edges, wallet.address, wallet.signMessage, vault.getKey());
+      window.history.replaceState(null, "", `?id=${id}`);
+
+      // Update vault cache with current nodes
+      vault.put(id, serializeNodes(nodes), serializeEdges(edges));
+
+      // Mint NFT for new strategies
+      if (isNew && wallet.address) {
+        const phantom = (window as any).phantom?.solana ?? (window as any).solana;
+        if (phantom?.isPhantom) {
+          try {
+            await mintNft(id, wallet.address, strategyName, "", {
+              publicKey: phantom.publicKey,
+              signTransaction: (tx: any) => phantom.signTransaction(tx),
+              signAllTransactions: (txs: any) => phantom.signAllTransactions(txs),
+            });
+          } catch (err: any) {
+            console.error("NFT minting failed:", err);
+            setSaveError(`NFT mint failed: ${err.message}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("Save failed:", err);
+      setSaveError(err.message || "Save failed");
+    }
+  }, [strategyName, nodes, edges, save, mintNft, wallet, strategy?.id, vault]);
+
+  const handleDeploy = useCallback(async () => {
+    // Show payment modal — user must connect wallet and confirm stream
+    setShowPaymentModal(true);
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -352,59 +421,7 @@ function CanvasInner() {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [nodes]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleSave = useCallback(async () => {
-    if (!wallet.isConnected || !wallet.address) {
-      wallet.connect();
-      return;
-    }
-
-    // Unlock vault if not already (derives encryption key)
-    if (!vault.isUnlocked) {
-      await vault.unlock(wallet.address, wallet.signMessage);
-    }
-
-    const isNew = !strategy?.id;
-    const id = await save(strategyName, nodes, edges, wallet.address, wallet.signMessage, vault.getKey());
-    window.history.replaceState(null, "", `?id=${id}`);
-
-    // Update vault cache with current nodes
-    vault.put(id, serializeNodes(nodes), serializeEdges(edges));
-
-    // Mint NFT for new strategies
-    if (isNew && wallet.address) {
-      try {
-        const phantom = (window as any).phantom?.solana;
-        if (phantom) {
-          // Fetch the AI-generated description (may have been created during save)
-          let description = "";
-          try {
-            const descRes = await fetch(`/api/strategies/${id}`, {
-              headers: { "Content-Type": "application/json", "X-Wallet-Address": wallet.address },
-            });
-            if (descRes.ok) {
-              const strat = await descRes.json();
-              description = strat.description || "";
-            }
-          } catch {}
-
-          await mintNft(id, wallet.address, strategyName, description, {
-            publicKey: phantom.publicKey,
-            signTransaction: (tx: any) => phantom.signTransaction(tx),
-            signAllTransactions: (txs: any) => phantom.signAllTransactions(txs),
-          });
-        }
-      } catch (err: any) {
-        console.warn("NFT minting skipped:", err.message);
-      }
-    }
-  }, [strategyName, nodes, edges, save, mintNft, wallet, strategy?.id, vault]);
-
-  const handleDeploy = useCallback(async () => {
-    // Show payment modal — user must connect wallet and confirm stream
-    setShowPaymentModal(true);
-  }, []);
+  }, [nodes, handleSave, handleDeploy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConfirmDeploy = useCallback(async () => {
     setShowPaymentModal(false);
@@ -569,6 +586,15 @@ function CanvasInner() {
         onConnectWallet={wallet.connect}
         onDisconnectWallet={wallet.disconnect}
       />
+      {/* Error banner */}
+      {saveError && (
+        <div className="px-4 py-2 bg-red-900/80 text-red-200 text-xs flex items-center justify-between">
+          <span>{saveError}</span>
+          <button onClick={() => setSaveError(null)} className="ml-4 text-red-400 hover:text-red-200">
+            &times;
+          </button>
+        </div>
+      )}
       {/* Live stats bar — visible when strategy is running */}
       {(strategyStatus === "running" || strategyStatus === "paused") && liveStats.tickCount > 0 && (
         <LiveStatsBar

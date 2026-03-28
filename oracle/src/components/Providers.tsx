@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { StrategyVaultProvider, useStrategyVault } from "@/hooks/useStrategyVault";
-import { useWallet } from "@/hooks/useWallet";
+import { WalletProvider, useWallet } from "@/hooks/useWallet";
 
 function VaultAutoUnlock({ children }: { children: React.ReactNode }) {
   const vault = useStrategyVault();
@@ -27,8 +27,10 @@ function VaultAutoUnlock({ children }: { children: React.ReactNode }) {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <StrategyVaultProvider>
-      <VaultAutoUnlock>{children}</VaultAutoUnlock>
-    </StrategyVaultProvider>
+    <WalletProvider>
+      <StrategyVaultProvider>
+        <VaultAutoUnlock>{children}</VaultAutoUnlock>
+      </StrategyVaultProvider>
+    </WalletProvider>
   );
 }
