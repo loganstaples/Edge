@@ -227,7 +227,7 @@ export default function MarketplacePage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
+              className="grid grid-cols-1 md:grid-cols-2 gap-4"
             >
               {filtered.map((strategy, i) => (
                 <MarketplaceStrategyCard

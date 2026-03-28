@@ -1075,20 +1075,36 @@ export async function runBacktest(
       }
 
       if (shouldClose) {
-        allTrades.push({
-          tick: t,
-          timestamp,
-          marketId: pos.marketId,
-          eventTitle: pos.eventTitle,
-          platform: pos.platform,
-          direction: pos.direction,
-          entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
-          exitPrice: parseFloat(currentPrice.toFixed(4)),
-          amount: pos.amount,
-          pnl: parseFloat(unrealizedPnl.toFixed(2)),
-          status: "closed",
-          exitReason,
-        });
+        // Update the existing open trade entry instead of pushing a duplicate
+        const openIdx = allTrades.findIndex(
+          (tr) => tr.marketId === pos.marketId && tr.status === "open" && tr.entryPrice === parseFloat(pos.entryPrice.toFixed(4)),
+        );
+        if (openIdx !== -1) {
+          allTrades[openIdx] = {
+            ...allTrades[openIdx],
+            tick: t,
+            timestamp,
+            exitPrice: parseFloat(currentPrice.toFixed(4)),
+            pnl: parseFloat(unrealizedPnl.toFixed(2)),
+            status: "closed",
+            exitReason,
+          };
+        } else {
+          allTrades.push({
+            tick: t,
+            timestamp,
+            marketId: pos.marketId,
+            eventTitle: pos.eventTitle,
+            platform: pos.platform,
+            direction: pos.direction,
+            entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
+            exitPrice: parseFloat(currentPrice.toFixed(4)),
+            amount: pos.amount,
+            pnl: parseFloat(unrealizedPnl.toFixed(2)),
+            status: "closed",
+            exitReason,
+          });
+        }
 
         equity += unrealizedPnl;
         toClose.push(i);
@@ -1469,20 +1485,36 @@ export async function runBacktest(
                     const pnl = pos.direction === "YES"
                       ? (exitPrice - pos.entryPrice) * pos.amount
                       : (pos.entryPrice - exitPrice) * pos.amount;
-                    allTrades.push({
-                      tick: t,
-                      timestamp: new Date(tickTs * 1000).toISOString(),
-                      marketId: pos.marketId,
-                      eventTitle: pos.eventTitle,
-                      platform: pos.platform,
-                      direction: pos.direction,
-                      entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
-                      exitPrice: parseFloat(exitPrice.toFixed(4)),
-                      amount: pos.amount,
-                      pnl: parseFloat(pnl.toFixed(2)),
-                      status: "closed",
-                      exitReason: "sell signal (price stalled)",
-                    });
+                    // Update the existing open trade entry instead of pushing a duplicate
+                    const openIdx = allTrades.findIndex(
+                      (tr) => tr.marketId === pos.marketId && tr.status === "open" && tr.entryPrice === parseFloat(pos.entryPrice.toFixed(4)),
+                    );
+                    if (openIdx !== -1) {
+                      allTrades[openIdx] = {
+                        ...allTrades[openIdx],
+                        tick: t,
+                        timestamp: new Date(tickTs * 1000).toISOString(),
+                        exitPrice: parseFloat(exitPrice.toFixed(4)),
+                        pnl: parseFloat(pnl.toFixed(2)),
+                        status: "closed",
+                        exitReason: "sell signal (price stalled)",
+                      };
+                    } else {
+                      allTrades.push({
+                        tick: t,
+                        timestamp: new Date(tickTs * 1000).toISOString(),
+                        marketId: pos.marketId,
+                        eventTitle: pos.eventTitle,
+                        platform: pos.platform,
+                        direction: pos.direction,
+                        entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
+                        exitPrice: parseFloat(exitPrice.toFixed(4)),
+                        amount: pos.amount,
+                        pnl: parseFloat(pnl.toFixed(2)),
+                        status: "closed",
+                        exitReason: "sell signal (price stalled)",
+                      });
+                    }
                     equity += pnl;
                     openPositions.splice(i, 1);
                     tradesThisTick++;
@@ -1506,6 +1538,21 @@ export async function runBacktest(
                     exitTicks: tr.exitTicks,
                     takeProfit: tr.takeProfit,
                     stopLoss: tr.stopLoss,
+                  });
+                  // Record the entry trade immediately so the trade count updates right away
+                  allTrades.push({
+                    tick: t,
+                    timestamp: new Date(tickTs * 1000).toISOString(),
+                    marketId: tr.marketId,
+                    eventTitle: tr.eventTitle,
+                    platform: tr.platform,
+                    direction: tr.direction,
+                    entryPrice: parseFloat(currentPrice.toFixed(4)),
+                    exitPrice: 0,
+                    amount: tr.amount,
+                    pnl: 0,
+                    status: "open",
+                    exitReason: undefined,
                   });
                   tradesThisTick++;
                 }
@@ -1622,20 +1669,35 @@ export async function runBacktest(
       ? (exitPrice - pos.entryPrice) * pos.amount
       : (pos.entryPrice - exitPrice) * pos.amount;
 
-    allTrades.push({
-      tick: cfg.ticks - 1,
-      timestamp: new Date(finalTs * 1000).toISOString(),
-      marketId: pos.marketId,
-      eventTitle: pos.eventTitle,
-      platform: pos.platform,
-      direction: pos.direction,
-      entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
-      exitPrice: parseFloat(exitPrice.toFixed(4)),
-      amount: pos.amount,
-      pnl: parseFloat(pnl.toFixed(2)),
-      status: "open",
-      exitReason: "backtest ended",
-    });
+    // Update the existing open trade entry with final settlement values
+    const openIdx = allTrades.findIndex(
+      (tr) => tr.marketId === pos.marketId && tr.status === "open" && tr.entryPrice === parseFloat(pos.entryPrice.toFixed(4)),
+    );
+    if (openIdx !== -1) {
+      allTrades[openIdx] = {
+        ...allTrades[openIdx],
+        tick: cfg.ticks - 1,
+        timestamp: new Date(finalTs * 1000).toISOString(),
+        exitPrice: parseFloat(exitPrice.toFixed(4)),
+        pnl: parseFloat(pnl.toFixed(2)),
+        exitReason: "backtest ended",
+      };
+    } else {
+      allTrades.push({
+        tick: cfg.ticks - 1,
+        timestamp: new Date(finalTs * 1000).toISOString(),
+        marketId: pos.marketId,
+        eventTitle: pos.eventTitle,
+        platform: pos.platform,
+        direction: pos.direction,
+        entryPrice: parseFloat(pos.entryPrice.toFixed(4)),
+        exitPrice: parseFloat(exitPrice.toFixed(4)),
+        amount: pos.amount,
+        pnl: parseFloat(pnl.toFixed(2)),
+        status: "open",
+        exitReason: "backtest ended",
+      });
+    }
 
     equity += pnl;
   }
