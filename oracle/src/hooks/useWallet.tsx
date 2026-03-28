@@ -1,5 +1,6 @@
 "use client";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
+import type { ReactNode } from "react";
 import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 
@@ -50,12 +51,21 @@ function getPhantom(): PhantomProvider | null {
   return w.solana?.isPhantom ? w.solana : (w.phantom?.solana?.isPhantom ? w.phantom.solana : null);
 }
 
+interface WalletContextValue extends WalletState {
+  connect: () => Promise<void>;
+  disconnect: () => Promise<void>;
+  signAndSendTransaction: (transaction: any) => Promise<{ signature: string }>;
+  signMessage: (message: Uint8Array) => Promise<{ signature: Uint8Array }>;
+  refreshBalance: () => Promise<void>;
+}
+
+const WalletContext = createContext<WalletContextValue | null>(null);
+
 /**
- * Real Phantom wallet connection hook for Solana.
- * Detects the Phantom browser extension, connects to it,
- * and fetches on-chain USDC balance.
+ * Shared wallet provider — wraps the app so every useWallet() consumer
+ * sees the same connection state.
  */
-export function useWallet() {
+export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<WalletState>({
     address: null,
     balance: 0,
@@ -176,7 +186,7 @@ export function useWallet() {
     return phantom.signMessage(message);
   }, []);
 
-  return {
+  const value: WalletContextValue = {
     ...wallet,
     connect,
     disconnect,
@@ -184,4 +194,21 @@ export function useWallet() {
     signMessage,
     refreshBalance: () => wallet.address ? refreshBalance(wallet.address) : Promise.resolve(),
   };
+
+  return (
+    <WalletContext.Provider value={value}>
+      {children}
+    </WalletContext.Provider>
+  );
+}
+
+/**
+ * Shared wallet hook — all consumers see the same connection state.
+ */
+export function useWallet(): WalletContextValue {
+  const ctx = useContext(WalletContext);
+  if (!ctx) {
+    throw new Error("useWallet must be used within <WalletProvider>");
+  }
+  return ctx;
 }

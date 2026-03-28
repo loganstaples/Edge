@@ -32,3 +32,6 @@ oracle/test-*.ts
 # Superpowers/tooling artifacts
 docs/superpowers/
 oracle/docs/
+
+# Claude Code worktrees
+.claude/

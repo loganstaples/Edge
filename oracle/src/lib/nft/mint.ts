@@ -9,7 +9,6 @@ import { walletAdapterIdentity } from "@metaplex-foundation/umi-signer-wallet-ad
 import {
   generateSigner,
   percentAmount,
-  publicKey as umiPublicKey,
 } from "@metaplex-foundation/umi";
 
 const RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
@@ -24,7 +23,7 @@ export interface MintResult {
  */
 export async function mintStrategyNft(
   strategyId: string,
-  ownerAddress: string,
+  _ownerAddress: string,
   strategyName: string,
   description: string,
   walletAdapter: {
@@ -35,44 +34,26 @@ export async function mintStrategyNft(
 ): Promise<MintResult> {
   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
 
-  // Build off-chain metadata JSON and encode as data URI so Phantom can
-  // always read it (even on localhost / devnet with no public server).
-  const metadataJson = {
-    name: strategyName.slice(0, 32),
-    symbol: "EDGE",
-    description: description || `Trading strategy built on EDGE`,
-    image: `${origin}/api/strategies/${strategyId}/og-image`,
-    external_url: `${origin}/?id=${strategyId}`,
-    attributes: [
-      { trait_type: "Strategy ID", value: strategyId },
-      { trait_type: "Platform", value: "EDGE" },
-    ],
-    properties: {
-      category: "strategy",
-      files: [],
-    },
-  };
-  const metadataUri = `data:application/json;base64,${btoa(JSON.stringify(metadataJson))}`;
+  // Point to the metadata.json API endpoint — Metaplex limits the on-chain
+  // URI field to 200 bytes, so a data-URI approach won't fit.
+  const metadataUri = `${origin}/api/strategies/${strategyId}/metadata.json`;
 
   const umi = createUmi(RPC_URL).use(mplTokenMetadata());
-  umi.use(walletAdapterIdentity(walletAdapter));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  umi.use(walletAdapterIdentity(walletAdapter as any));
 
   const mint = generateSigner(umi);
-
-  // Each strategy is a standalone NFT, not part of a collection.
-  // Use a unique symbol per mint to prevent Phantom from auto-grouping.
-  const uniqueSymbol = `EDGE`;
 
   const { signature } = await createNft(umi, {
     mint,
     name: strategyName.slice(0, 32),
-    symbol: uniqueSymbol,
+    symbol: `E-${strategyId.slice(0, 8)}`,
     uri: metadataUri,
     sellerFeeBasisPoints: percentAmount(0),
     isCollection: false,
     creators: [
       {
-        address: umiPublicKey(ownerAddress),
+        address: umi.identity.publicKey,
         verified: true,
         share: 100,
       },

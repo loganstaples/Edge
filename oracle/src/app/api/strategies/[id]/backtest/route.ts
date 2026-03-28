@@ -24,6 +24,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     ticks?: number;
     startingCapital?: number;
     period?: "1d" | "1w" | "2w" | "1m";
+    speed?: "slow" | "normal" | "fast";
   } = {};
   try {
     body = await req.json();
@@ -45,18 +46,44 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     );
   }
 
-  try {
-    const result = await runBacktest(strategyWithNodes, {
-      ticks: body.ticks ?? 60,
-      startingCapital: body.startingCapital ?? 1000,
-      period: body.period ?? "1w",
-    });
+  const stream = new TransformStream();
+  const writer = stream.writable.getWriter();
+  const encoder = new TextEncoder();
 
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json(
-      { error: `Backtest failed: ${String(error)}` },
-      { status: 500 },
-    );
-  }
+  const write = (event: Record<string, unknown>) => {
+    writer.write(encoder.encode(JSON.stringify(event) + "\n"));
+  };
+
+  const tickDelay = body.speed === "slow" ? 2000 : body.speed === "fast" ? 0 : 500;
+
+  (async () => {
+    try {
+      await runBacktest(
+        strategyWithNodes,
+        {
+          ticks: body.ticks ?? 60,
+          startingCapital: body.startingCapital ?? 1000,
+          period: body.period ?? "1w",
+        },
+        async (event) => {
+          write(event);
+          if (event.type === "tick" && tickDelay > 0) {
+            await new Promise((r) => setTimeout(r, tickDelay));
+          }
+        },
+      );
+    } catch (error) {
+      write({ type: "error", error: `Backtest failed: ${String(error)}` });
+    } finally {
+      writer.close();
+    }
+  })();
+
+  return new Response(stream.readable, {
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }
