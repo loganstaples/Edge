@@ -603,7 +603,7 @@ function CanvasInner() {
             connectionLineStyle={{ stroke: "#9b9bb0", strokeWidth: 2, strokeDasharray: "6 3" }}
             fitView
             proOptions={{ hideAttribution: true }}
-            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""} ${streamingSettle ? "streaming-settle" : ""} ${isStreamingIn && !streamingSettle ? "streaming-edges-enter" : ""}`}
+            className={`bg-edge-bg ${nodes.length === 0 ? "react-flow-default-cursor" : ""} ${streamingSettle ? "streaming-settle" : ""} ${isStreamingIn && !streamingSettle && !streamFirstBatchRef.current ? "streaming-edges-enter" : ""}`}
           >
             <MiniMap
               nodeColor="#2a2a2e"
