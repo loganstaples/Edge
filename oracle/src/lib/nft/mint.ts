@@ -1,39 +1,18 @@
-/**
- * Strategy NFT minting on Solana.
- *
- * Each strategy is represented by a unique SPL Token (supply=1, decimals=0).
- * The token is minted to the creator's wallet, and mint authority is revoked
- * so no more can ever be created — making it a true NFT.
- */
+"use client";
 
+import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  clusterApiUrl,
-} from "@solana/web3.js";
+  createNft,
+  mplTokenMetadata,
+} from "@metaplex-foundation/mpl-token-metadata";
+import { walletAdapterIdentity } from "@metaplex-foundation/umi-signer-wallet-adapters";
 import {
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  MINT_SIZE,
-  createInitializeMintInstruction,
-  createAssociatedTokenAccountInstruction,
-  createMintToInstruction,
-  createSetAuthorityInstruction,
-  AuthorityType,
-  getAssociatedTokenAddress,
-} from "@solana/spl-token";
+  generateSigner,
+  percentAmount,
+  publicKey as umiPublicKey,
+} from "@metaplex-foundation/umi";
 
-function getConnection(): Connection {
-  const rpc =
-    typeof window !== "undefined"
-      ? process.env.NEXT_PUBLIC_SOLANA_RPC_URL || ""
-      : "";
-  const endpoint = rpc || clusterApiUrl("devnet");
-  return new Connection(endpoint, "confirmed");
-}
+const RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.devnet.solana.com";
 
 export interface MintResult {
   mintAddress: string;
@@ -41,96 +20,47 @@ export interface MintResult {
 }
 
 /**
- * Build, sign, and send a transaction that mints a 1-of-1 Strategy NFT.
- *
- * @param ownerAddress - The wallet address that will own the NFT
- * @param signAndSendTransaction - Phantom's signAndSendTransaction method
- * @returns The mint public key (NFT address) and transaction signature
+ * Mint a strategy NFT with full Metaplex metadata.
  */
 export async function mintStrategyNft(
+  strategyId: string,
   ownerAddress: string,
-  signAndSendTransaction: (tx: Transaction) => Promise<{ signature: string }>
+  strategyName: string,
+  walletAdapter: {
+    publicKey: { toBytes(): Uint8Array };
+    signTransaction: <T>(tx: T) => Promise<T>;
+    signAllTransactions?: <T>(txs: T[]) => Promise<T[]>;
+  },
 ): Promise<MintResult> {
-  const connection = getConnection();
-  const owner = new PublicKey(ownerAddress);
-  const mintKeypair = Keypair.generate();
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const metadataUri = `${origin}/api/strategies/${strategyId}/metadata.json`;
 
-  // Rent-exempt minimum for mint account
-  const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+  const umi = createUmi(RPC_URL).use(mplTokenMetadata());
+  umi.use(walletAdapterIdentity(walletAdapter));
 
-  // Associated token account for the owner
-  const ata = await getAssociatedTokenAddress(
-    mintKeypair.publicKey,
-    owner,
-    false,
-    TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
+  const mint = generateSigner(umi);
 
-  const transaction = new Transaction().add(
-    // 1. Create the mint account
-    SystemProgram.createAccount({
-      fromPubkey: owner,
-      newAccountPubkey: mintKeypair.publicKey,
-      space: MINT_SIZE,
-      lamports,
-      programId: TOKEN_PROGRAM_ID,
-    }),
+  const { signature } = await createNft(umi, {
+    mint,
+    name: strategyName.slice(0, 32),
+    symbol: "EDGE",
+    uri: metadataUri,
+    sellerFeeBasisPoints: percentAmount(0),
+    creators: [
+      {
+        address: umiPublicKey(ownerAddress),
+        verified: true,
+        share: 100,
+      },
+    ],
+  }).sendAndConfirm(umi);
 
-    // 2. Initialize mint: 0 decimals = NFT, owner is mint authority
-    createInitializeMintInstruction(
-      mintKeypair.publicKey,
-      0, // decimals
-      owner, // mint authority
-      null // no freeze authority
-    ),
-
-    // 3. Create associated token account for the owner
-    createAssociatedTokenAccountInstruction(
-      owner, // payer
-      ata, // ATA address
-      owner, // owner
-      mintKeypair.publicKey // mint
-    ),
-
-    // 4. Mint exactly 1 token (the NFT)
-    createMintToInstruction(
-      mintKeypair.publicKey, // mint
-      ata, // destination
-      owner, // authority
-      1 // amount
-    ),
-
-    // 5. Revoke mint authority — no more tokens can ever be minted
-    createSetAuthorityInstruction(
-      mintKeypair.publicKey, // mint account
-      owner, // current authority
-      AuthorityType.MintTokens, // authority type
-      null // new authority (null = revoked)
-    )
-  );
-
-  // Set transaction metadata
-  const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.lastValidBlockHeight = lastValidBlockHeight;
-  transaction.feePayer = owner;
-
-  // Mint keypair must sign (required by SystemProgram.createAccount)
-  transaction.partialSign(mintKeypair);
-
-  // Phantom signs for the owner and sends
-  const { signature } = await signAndSendTransaction(transaction);
-
-  // Wait for confirmation
-  await connection.confirmTransaction(
-    { signature, blockhash, lastValidBlockHeight },
-    "confirmed"
-  );
+  const sigStr = typeof signature === "string"
+    ? signature
+    : Buffer.from(signature).toString("base64");
 
   return {
-    mintAddress: mintKeypair.publicKey.toBase58(),
-    signature,
+    mintAddress: mint.publicKey.toString(),
+    signature: sigStr,
   };
 }
