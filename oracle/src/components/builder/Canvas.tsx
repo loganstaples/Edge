@@ -25,7 +25,8 @@ import { AIPromptBar } from "./AIPromptBar";
 import { EmptyCanvas } from "./EmptyCanvas";
 import { DragFromPortMenu } from "./DragFromPortMenu";
 import { LiveStatsBar } from "./LiveStatsBar";
-import { useStrategy } from "@/hooks/useStrategy";
+import { useStrategy, serializeNodes, serializeEdges } from "@/hooks/useStrategy";
+import { useStrategyVault } from "@/hooks/useStrategyVault";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
 import { useWallet } from "@/hooks/useWallet";
 import { usePaymentStream } from "@/hooks/usePaymentStream";
@@ -74,6 +75,7 @@ function CanvasInner() {
   } | null>(null);
 
   const { strategy, isSaving, isMinting, save, mintNft, load, deploy, pause, setPublic } = useStrategy();
+  const vault = useStrategyVault();
   const wallet = useWallet();
   const paymentStream = usePaymentStream();
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -357,9 +359,18 @@ function CanvasInner() {
       wallet.connect();
       return;
     }
+
+    // Unlock vault if not already (derives encryption key)
+    if (!vault.isUnlocked) {
+      await vault.unlock(wallet.address, wallet.signMessage);
+    }
+
     const isNew = !strategy?.id;
-    const id = await save(strategyName, nodes, edges, wallet.address, wallet.signMessage);
+    const id = await save(strategyName, nodes, edges, wallet.address, wallet.signMessage, vault.getKey());
     window.history.replaceState(null, "", `?id=${id}`);
+
+    // Update vault cache with current nodes
+    vault.put(id, serializeNodes(nodes), serializeEdges(edges));
 
     // Mint NFT for new strategies
     if (isNew && wallet.address) {
@@ -376,7 +387,7 @@ function CanvasInner() {
         console.warn("NFT minting skipped:", err.message);
       }
     }
-  }, [strategyName, nodes, edges, save, mintNft, wallet, strategy?.id]);
+  }, [strategyName, nodes, edges, save, mintNft, wallet, strategy?.id, vault]);
 
   const handleDeploy = useCallback(async () => {
     // Show payment modal — user must connect wallet and confirm stream

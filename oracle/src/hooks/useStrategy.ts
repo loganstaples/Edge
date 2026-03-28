@@ -7,7 +7,7 @@ import { mintStrategyNft } from "@/lib/nft/mint";
 import { deriveEncryptionKey, encryptStrategy, decryptStrategy } from "@/lib/encryption/strategy-cipher";
 
 // Convert React Flow nodes/edges to our DB format
-function serializeNodes(nodes: Node[]): StrategyNode[] {
+export function serializeNodes(nodes: Node[]): StrategyNode[] {
   return nodes.map((n) => ({
     id: n.id,
     type: n.type!,
@@ -17,7 +17,7 @@ function serializeNodes(nodes: Node[]): StrategyNode[] {
   }));
 }
 
-function serializeEdges(edges: Edge[]): StrategyConnection[] {
+export function serializeEdges(edges: Edge[]): StrategyConnection[] {
   return edges.map((e) => ({
     id: e.id,
     source_id: e.source,
@@ -73,6 +73,7 @@ export function useStrategy() {
     edges: Edge[],
     walletAddress?: string | null,
     signMessage?: (message: Uint8Array) => Promise<{ signature: Uint8Array }>,
+    encryptionKey?: CryptoKey | null,
   ): Promise<string> => {
     setIsSaving(true);
     try {
@@ -82,15 +83,11 @@ export function useStrategy() {
       let strategyId: string;
 
       if (strategy?.id) {
-        // Update existing
+        // Update existing — only send public metadata (name), not nodes
         await fetch(`/api/strategies/${strategy.id}`, {
           method: "PUT",
           headers: authHeaders(walletAddress),
-          body: JSON.stringify({
-            name,
-            nodes: serializedNodes,
-            connections: serializedEdges,
-          }),
+          body: JSON.stringify({ name }),
         });
         strategyId = strategy.id;
       } else {
@@ -122,9 +119,9 @@ export function useStrategy() {
       }
 
       // Encrypt and upload to 0G Storage (best-effort, non-blocking for UX)
-      if (signMessage && walletAddress) {
+      const key = encryptionKey || (signMessage ? await deriveEncryptionKey(signMessage) : null);
+      if (key && walletAddress) {
         try {
-          const key = await deriveEncryptionKey(signMessage);
           const encrypted = await encryptStrategy(
             { nodes: serializedNodes, connections: serializedEdges },
             key
