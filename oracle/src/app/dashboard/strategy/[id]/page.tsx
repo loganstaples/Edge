@@ -12,6 +12,8 @@ import { TradeHistory } from "@/components/dashboard/TradeHistory";
 import { BacktestPanel } from "@/components/dashboard/BacktestPanel";
 import { nodeTypeComponents } from "@/components/builder/nodes";
 import { useStrategyExecution } from "@/hooks/useStrategyExecution";
+import { useStrategyVault } from "@/hooks/useStrategyVault";
+import { useWallet } from "@/hooks/useWallet";
 import type { Strategy, StrategyPerformance } from "@/types";
 
 type DetailTab = "overview" | "logs" | "backtest";
@@ -66,6 +68,15 @@ export default function StrategyDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<DetailTab>("overview");
   const [actionLoading, setActionLoading] = useState(false);
+  const vault = useStrategyVault();
+  const wallet = useWallet();
+
+  // Unlock vault on wallet connect
+  useEffect(() => {
+    if (wallet.isConnected && wallet.address && !vault.isUnlocked && !vault.isUnlocking) {
+      vault.unlock(wallet.address, wallet.signMessage);
+    }
+  }, [wallet.isConnected, wallet.address, vault.isUnlocked, vault.isUnlocking]);
 
   useEffect(() => {
     Promise.all([
@@ -80,6 +91,14 @@ export default function StrategyDetailPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Merge vault-decrypted nodes into strategy
+  const vaultEntry = vault.get(id);
+  const strategyWithNodes = strategy && vaultEntry ? {
+    ...strategy,
+    nodes: vaultEntry.nodes,
+    connections: vaultEntry.connections,
+  } : strategy;
 
   const { logs: _executionLogs, isExecuting, nodeStatuses } = useStrategyExecution(
     strategy?.id ?? null,
@@ -280,7 +299,7 @@ export default function StrategyDetailPage() {
             <div className="glass relative overflow-hidden rounded-lg" style={{ height: "500px" }}>
               <div className="gradient-top-edge" />
               <ReactFlowProvider>
-                <StrategyCanvas strategy={strategy} nodeStatuses={nodeStatuses} />
+                <StrategyCanvas strategy={strategyWithNodes!} nodeStatuses={nodeStatuses} />
               </ReactFlowProvider>
             </div>
           )}
@@ -300,7 +319,7 @@ export default function StrategyDetailPage() {
 
           {tab === "backtest" && (
             <div className="bg-edge-surface border border-edge-border rounded-lg p-5">
-              <BacktestPanel strategyId={id} />
+              <BacktestPanel strategyId={id} nodes={vaultEntry?.nodes} connections={vaultEntry?.connections} />
             </div>
           )}
         </motion.div>
