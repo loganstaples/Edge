@@ -118,7 +118,14 @@ export function useStrategy() {
         setStrategy(full);
       }
 
-      // Encrypt and upload to 0G Storage (best-effort, non-blocking for UX)
+      // Generate AI description (non-blocking — runs while encryption happens)
+      const descriptionPromise = fetch(`/api/strategies/${strategyId}/generate-description`, {
+        method: "POST",
+        headers: authHeaders(walletAddress),
+        body: JSON.stringify({ nodes: serializedNodes, connections: serializedEdges }),
+      }).catch(() => {}); // Best-effort, don't block save
+
+      // Encrypt and upload to 0G Storage
       const key = encryptionKey || (signMessage ? await deriveEncryptionKey(signMessage) : null);
       if (key && walletAddress) {
         try {
