@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Header } from "@/components/Header";
 import { PortfolioSummary } from "@/components/dashboard/PortfolioSummary";
 import { StrategyCard } from "@/components/dashboard/StrategyCard";
+import { useWallet } from "@/hooks/useWallet";
 import { Strategy, StrategyPerformance, ExecutionLogEntry } from "@/types";
 
 type StrategyWithPerf = Strategy & { performance?: StrategyPerformance };
@@ -64,9 +65,14 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState<FilterTab>("active");
   const [search, setSearch] = useState("");
   const [logs, setLogs] = useState<(ExecutionLogEntry & { strategyName: string })[]>([]);
+  const wallet = useWallet();
 
   useEffect(() => {
-    fetch("/api/strategies")
+    const headers: Record<string, string> = {};
+    if (wallet.address) {
+      headers["X-Wallet-Address"] = wallet.address;
+    }
+    fetch("/api/strategies", { headers })
       .then((r) => (r.ok ? r.json() : []))
       .then(async (data) => {
         const list: StrategyWithPerf[] = Array.isArray(data) ? data : [];
@@ -94,7 +100,7 @@ export default function DashboardPage() {
       })
       .catch(() => setStrategies([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [wallet.address]);
 
   const filtered = strategies.filter((s) => {
     const matchesSearch =
