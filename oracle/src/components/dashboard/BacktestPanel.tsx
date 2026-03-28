@@ -72,8 +72,8 @@ interface Props {
   strategyId: string;
   nodes?: any[];
   connections?: any[];
-  /** Called on each tick with node outputs and per-node animation timing (ms) */
-  onTickNodeState?: (nodeOutputs: Record<string, Record<string, any>>, perNodeMs: number) => void;
+  /** Called to highlight a node on the canvas during backtest (null = clear) */
+  onNodeHighlight?: (nodeId: string | null) => void;
 }
 
 type Tab = "equity" | "trades" | "markets" | "log";
@@ -110,7 +110,7 @@ function makeEmptyResult(strategyId: string, ticks: number, period: string, star
   };
 }
 
-export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onTickNodeState }: Props) {
+export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onNodeHighlight }: Props) {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,11 +142,6 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
     setResult(makeEmptyResult(strategyId, ticks, period, 1000));
     setTab("equity");
 
-    // Compute per-node animation timing — server delay matches total animation
-    const nodeCount = Math.max(propNodes?.length ?? 1, 1);
-    const perNodeMs = speed === "slow" ? 500 : speed === "fast" ? 100 : 300;
-    const tickDelay = perNodeMs * nodeCount;
-
     try {
       const res = await fetch(`/api/strategies/${strategyId}/backtest`, {
         method: "POST",
@@ -155,7 +150,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
           ticks,
           startingCapital: 1000,
           period,
-          tickDelay,
+          speed,
           ...(propNodes && propNodes.length > 0 ? { nodes: propNodes, connections: propConnections } : {}),
         }),
         signal: abort.signal,
@@ -186,16 +181,20 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
 
           if (event.type === "setup") {
             setStreamPhase(event.message);
+          } else if (event.type === "node_start") {
+            // Highlight this node on the canvas — tracks real execution
+            onNodeHighlight?.(event.nodeId);
           } else if (event.type === "tick") {
             setResult(event.data);
             setProgress((event.tick + 1) / event.totalTicks);
             setStreamPhase(`Tick ${event.tick + 1} / ${event.totalTicks}`);
             setCurrentTick(event.tick);
             setTotalTicks(event.totalTicks);
+            // Clear highlight between ticks
+            onNodeHighlight?.(null);
             // Extract narration from the latest tick
             const latestTick = event.data?.ticks?.[event.data.ticks.length - 1];
             if (latestTick?.narrations?.length > 0) {
-              // Pick the best narration: prefer one with a trade, then highest edge
               const narrs = latestTick.narrations as TickNarration[];
               const best = narrs.find((n: TickNarration) => n.tradeAction)
                 ?? narrs.reduce((a: TickNarration, b: TickNarration) =>
@@ -204,16 +203,11 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
             } else {
               setCurrentNarration(null);
             }
-            // Notify parent for canvas highlighting
-            if (onTickNodeState && latestTick) {
-              onTickNodeState(latestTick.nodeOutputs ?? {}, perNodeMs);
-            }
           } else if (event.type === "done") {
             setResult(event.data);
             setProgress(1);
             setBacktestDone(true);
-            // Clear node highlights when done
-            onTickNodeState?.({}, 0);
+            onNodeHighlight?.(null);
           } else if (event.type === "error") {
             setResult(null);
             throw new Error(event.error);
@@ -229,7 +223,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
       setStreamPhase(null);
       abortRef.current = null;
     }
-  }, [strategyId, ticks, period, speed, propNodes, propConnections, onTickNodeState]);
+  }, [strategyId, ticks, period, speed, propNodes, propConnections, onNodeHighlight]);
 
   // --- Launch UI ---
   if (!result && !loading) {

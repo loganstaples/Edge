@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -25,11 +25,10 @@ const statusStyles: Record<string, { label: string; badgeClass: string; glow: st
   stopped: { label: "Stopped", badgeClass: "text-accent-red border-accent-red/30", glow: "none" },
 };
 
-function StrategyCanvas({ strategy, nodeStatuses, highlightNodeId, nodeOutputs, animateEdges }: {
+function StrategyCanvas({ strategy, nodeStatuses, highlightNodeId, animateEdges }: {
   strategy: Strategy;
   nodeStatuses: Record<string, string>;
   highlightNodeId?: string | null;
-  nodeOutputs?: Record<string, Record<string, any>>;
   animateEdges?: boolean;
 }) {
   const nodes = useMemo(() => strategy.nodes.map((n) => ({
@@ -40,9 +39,8 @@ function StrategyCanvas({ strategy, nodeStatuses, highlightNodeId, nodeOutputs, 
       config: n.config,
       status: nodeStatuses[n.id] ?? "idle",
       isActive: n.id === highlightNodeId,
-      lastOutput: nodeOutputs?.[n.id],
     },
-  })), [strategy.nodes, nodeStatuses, highlightNodeId, nodeOutputs]);
+  })), [strategy.nodes, nodeStatuses, highlightNodeId]);
 
   const edges = useMemo(() => strategy.connections.map((c) => ({
     id: c.id,
@@ -114,44 +112,12 @@ export default function StrategyDetailPage() {
     30000
   );
 
-  // Backtest canvas: highlight ONE node at a time, left to right
+  // Backtest canvas: highlight tracks real server-side execution
   const [btHighlightNode, setBtHighlightNode] = useState<string | null>(null);
-  const [btNodeOutputs, setBtNodeOutputs] = useState<Record<string, Record<string, any>>>({});
-  const btTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // All strategy node IDs sorted by x-position (left to right) — stable order
-  const orderedNodeIds = useMemo(() => {
-    if (!strategyWithNodes?.nodes?.length) return [];
-    return [...strategyWithNodes.nodes]
-      .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
-      .map((n) => n.id);
-  }, [strategyWithNodes?.nodes]);
-
-  const handleTickNodeState = useCallback((outputs: Record<string, Record<string, any>>, perNodeMs: number) => {
-    // Clear any pending timers from previous tick
-    for (const t of btTimersRef.current) clearTimeout(t);
-    btTimersRef.current = [];
-
-    if (perNodeMs === 0) {
-      setBtHighlightNode(null);
-      setBtNodeOutputs({});
-      return;
-    }
-
-    setBtNodeOutputs(outputs);
-
-    // Stagger through ALL nodes sorted by x-position, one at a time
-    orderedNodeIds.forEach((nodeId, i) => {
-      const timer = setTimeout(() => setBtHighlightNode(nodeId), i * perNodeMs);
-      btTimersRef.current.push(timer);
-    });
-    // Turn off the last node at the end
-    const offTimer = setTimeout(
-      () => setBtHighlightNode(null),
-      orderedNodeIds.length * perNodeMs,
-    );
-    btTimersRef.current.push(offTimer);
-  }, [orderedNodeIds]);
+  const handleNodeHighlight = useCallback((nodeId: string | null) => {
+    setBtHighlightNode(nodeId);
+  }, []);
 
   const handleAction = async (action: "deploy" | "pause" | "stop") => {
     setActionLoading(true);
@@ -409,7 +375,6 @@ export default function StrategyDetailPage() {
                       strategy={strategyWithNodes}
                       nodeStatuses={nodeStatuses}
                       highlightNodeId={btHighlightNode}
-                      nodeOutputs={btNodeOutputs}
                       animateEdges={btHighlightNode != null}
                     />
                   </ReactFlowProvider>
@@ -420,7 +385,7 @@ export default function StrategyDetailPage() {
                   strategyId={id}
                   nodes={vaultEntry?.nodes}
                   connections={vaultEntry?.connections}
-                  onTickNodeState={handleTickNodeState}
+                  onNodeHighlight={handleNodeHighlight}
                 />
               </div>
             </div>

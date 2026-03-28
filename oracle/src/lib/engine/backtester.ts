@@ -102,6 +102,7 @@ export interface BacktestResult {
 
 export type BacktestProgressEvent =
   | { type: "setup"; message: string }
+  | { type: "node_start"; tick: number; nodeId: string }
   | { type: "tick"; tick: number; totalTicks: number; data: BacktestResult }
   | { type: "done"; data: BacktestResult }
   | { type: "error"; error: string };
@@ -1105,6 +1106,7 @@ export async function runBacktest(
     const tickActiveNodeIds: string[] = [];
 
     for (const src of sourceNodes) {
+      await onProgress?.({ type: "node_start", tick: t, nodeId: src.id });
       const riversBefore = rivers.length;
       if (src.type === "news_feed" || src.type === "news_monitor") {
         // Feed articles published within the current tick's time window so
@@ -1312,6 +1314,7 @@ export async function runBacktest(
     const tradedThisTick = new Set<string>();
     const tickNarrations: TickNarration[] = [];
     const tickNodeOutputs: Record<string, Record<string, any>> = {};
+    const highlightedThisTick = new Set<string>();
 
     for (const river of rivers) {
       const outputMap: Record<string, Record<string, any>> = {};
@@ -1325,6 +1328,12 @@ export async function runBacktest(
       let riverTradePrice: number | undefined;
 
       for (const node of downstream) {
+        // Emit node_start for canvas highlighting (once per node per tick)
+        if (onProgress && !highlightedThisTick.has(node.id)) {
+          highlightedThisTick.add(node.id);
+          await onProgress({ type: "node_start", tick: t, nodeId: node.id });
+        }
+
         if (blockedNodes.has(node.id)) continue;
 
         // Build river: merge initial + upstream outputs
