@@ -211,8 +211,26 @@ export default function StrategyDetailPage() {
                     <p className="text-2xs text-edge-muted mb-2">{strategy.description}</p>
                   )}
                   <div className="flex items-center gap-4 text-2xs text-edge-dim font-mono">
-                    <span>{strategy.nodes.length} nodes</span>
-                    <span>{strategy.connections.length} connections</span>
+                    {strategy.nftMint && (
+                      <span className="inline-flex items-center gap-1 text-violet-400">
+                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                        NFT Minted
+                      </span>
+                    )}
+                    {strategy.zgRootHash && (
+                      <span className="inline-flex items-center gap-1 text-cyan-400">
+                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                        Encrypted
+                      </span>
+                    )}
+                    {vaultEntry && (
+                      <span className="text-edge-muted">{vaultEntry.nodes.length} nodes · {vaultEntry.connections.length} edges</span>
+                    )}
                     <span>Created {new Date(strategy.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -222,6 +240,19 @@ export default function StrategyDetailPage() {
               <div className="flex items-center gap-2 shrink-0">
                 {isExecuting && (
                   <span className="text-2xs text-accent-green animate-pulse mr-1 font-mono">Executing...</span>
+                )}
+                {strategy.nftMint && (
+                  <a
+                    href={`https://explorer.solana.com/address/${strategy.nftMint}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-violet-500/20 text-sm text-violet-400 hover:bg-violet-500/10 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                    View NFT
+                  </a>
                 )}
                 <Link
                   href={`/?id=${strategy.id}`}

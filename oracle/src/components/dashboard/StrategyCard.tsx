@@ -93,9 +93,19 @@ export function StrategyCard({ strategy }: Props) {
               </div>
               <div className="min-w-0">
                 <h3 className="text-base font-medium text-white truncate">{strategy.name}</h3>
-                <p className="text-2xs font-mono text-edge-muted">
-                  {strategy.nodes.length} nodes · {strategy.connections.length} edges
-                </p>
+                <div className="flex items-center gap-2">
+                  {strategy.nftMint && (
+                    <span className="inline-flex items-center gap-1 text-2xs font-mono text-violet-400">
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      </svg>
+                      NFT
+                    </span>
+                  )}
+                  <p className="text-2xs font-mono text-edge-muted">
+                    {strategy.authorName !== "anonymous" ? strategy.authorName : strategy.ownerWallet ? `${strategy.ownerWallet.slice(0, 4)}...${strategy.ownerWallet.slice(-4)}` : "anonymous"}
+                  </p>
+                </div>
               </div>
             </div>
             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border shrink-0 ${status.badgeClass}`}>
