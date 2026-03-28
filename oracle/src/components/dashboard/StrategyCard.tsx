@@ -13,16 +13,16 @@ const statusConfig: Record<
   { dotColor: string; pulse: boolean; label: string; badgeClass: string }
 > = {
   running: {
-    dotColor: "bg-accent-green",
-    pulse: true,
+    dotColor: "bg-emerald-500",
+    pulse: false,
     label: "Running",
-    badgeClass: "text-accent-green border-accent-green/30",
+    badgeClass: "text-emerald-500 border-emerald-500/20",
   },
   paused: {
-    dotColor: "bg-accent-amber",
+    dotColor: "bg-amber-500",
     pulse: false,
     label: "Paused",
-    badgeClass: "text-accent-amber border-accent-amber/30",
+    badgeClass: "text-amber-500 border-amber-500/20",
   },
   stopped: {
     dotColor: "bg-edge-muted",
@@ -38,39 +38,21 @@ const statusConfig: Record<
   },
 };
 
-function sparklinePath(id: string, positive: boolean): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash << 5) - hash + id.charCodeAt(i);
-    hash |= 0;
-  }
-  const seed = Math.abs(hash);
-  const points: number[] = [];
-  for (let i = 0; i < 10; i++) {
-    const v = ((seed * (i + 1) * 7919) % 100) / 100;
-    points.push(positive ? 48 - v * 36 : 12 + v * 44);
-  }
-  const step = 240 / (points.length - 1);
-  return points
-    .map((y, i) => (i === 0 ? `M0 ${y}` : `L ${i * step} ${y}`))
-    .join(" ");
-}
+
 
 export function StrategyCard({ strategy }: Props) {
   const perf = strategy.performance;
   const status = statusConfig[strategy.status] ?? statusConfig.draft;
   const pnl = perf?.totalPnl ?? 0;
   const pnlPositive = pnl >= 0;
+  const decidedTrades = perf?.totalTrades ?? 0;
   const winRate =
-    perf && perf.totalTrades > 0
-      ? ((perf.winningTrades / perf.totalTrades) * 100).toFixed(1)
+    perf && decidedTrades > 0
+      ? ((perf.winningTrades / decidedTrades) * 100).toFixed(1)
       : "--";
   const sharpe = perf?.sharpeRatio?.toFixed(2) ?? "--";
 
   const isStopped = strategy.status === "stopped" || strategy.status === "draft";
-  const sparkline = sparklinePath(strategy.id, pnlPositive);
-  const strokeColor = pnlPositive ? "#34d399" : "#f87171";
-  const fillId = `fill-${strategy.id.replace(/[^a-zA-Z0-9]/g, "")}`;
 
   return (
     <Link href={`/dashboard/strategy/${strategy.id}`} className="block h-full">
@@ -95,78 +77,47 @@ export function StrategyCard({ strategy }: Props) {
                 <h3 className="text-base font-medium text-white truncate">{strategy.name}</h3>
                 <div className="flex items-center gap-2">
                   {strategy.nftMint && (
-                    <span className="inline-flex items-center gap-1 text-2xs font-mono text-violet-400">
-                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-md">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                       </svg>
                       NFT
                     </span>
                   )}
-                  <p className="text-2xs font-mono text-edge-muted">
+                  <p className="text-xs font-medium text-edge-muted">
                     {strategy.authorName !== "anonymous" ? strategy.authorName : strategy.ownerWallet ? `${strategy.ownerWallet.slice(0, 4)}...${strategy.ownerWallet.slice(-4)}` : "anonymous"}
                   </p>
                 </div>
               </div>
             </div>
-            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border shrink-0 ${status.badgeClass}`}>
-              {status.pulse && (
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green" />
-                </span>
-              )}
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border shrink-0 ${status.badgeClass}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${status.dotColor}`} />
               {status.label}
             </span>
           </div>
 
           {/* Description */}
           {strategy.description && (
-            <p className="text-2xs text-edge-muted mb-3 line-clamp-2">{strategy.description}</p>
+            <p className="text-sm text-edge-muted mb-6 flex-1 line-clamp-2 leading-relaxed">{strategy.description}</p>
           )}
 
-          {/* Sparkline */}
-          <div className="h-14 w-full mb-4 rounded-md overflow-hidden bg-edge-bg/50">
-            <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 240 56">
-              {isStopped ? (
-                <path d="M0 28 L 240 28" fill="none" stroke="#3a3f55" strokeWidth={1} strokeDasharray="4 4" />
-              ) : (
-                <>
-                  <defs>
-                    <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={strokeColor} stopOpacity={0.2} />
-                      <stop offset="100%" stopColor={strokeColor} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <path d={`${sparkline} L 240 56 L 0 56 Z`} fill={`url(#${fillId})`} />
-                  <path
-                    d={sparkline}
-                    fill="none"
-                    stroke={strokeColor}
-                    strokeWidth={1.5}
-                    className={pnlPositive ? "sparkline-svg" : "sparkline-svg-red"}
-                  />
-                </>
-              )}
-            </svg>
-          </div>
-
-          {/* Stats Grid — HELIX-style internal blocks */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-              <p className="text-2xs text-edge-muted">P&L</p>
-              <p className={`text-lg font-mono font-light ${pnlPositive ? "text-accent-green" : "text-accent-red"}`}>
-                {pnlPositive ? "+" : ""}${pnl.toFixed(2)}
+          {/* Stats Grid */}
+          <div className="flex items-center justify-between mb-6 pt-3 border-t border-edge-border/30">
+            <div>
+              <p className="text-xs font-medium text-edge-muted mb-1">Weekly P&L</p>
+              <p className={`text-base font-semibold ${pnlPositive ? "text-emerald-400" : "text-rose-400"}`}>
+                {pnlPositive ? "+" : ""}{pnl.toFixed(2)}%
               </p>
             </div>
-            <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-              <p className="text-2xs text-edge-muted">Win Rate</p>
-              <p className="text-lg font-mono font-light text-white">
+            <div>
+              <p className="text-xs font-medium text-edge-muted mb-1">Win Rate</p>
+              <p className="text-base font-semibold text-white">
                 {winRate}{winRate !== "--" && "%"}
               </p>
             </div>
-            <div className="bg-edge-bg rounded-md px-3 py-2 text-center">
-              <p className="text-2xs text-edge-muted">Sharpe</p>
-              <p className="text-lg font-mono font-light text-white">{sharpe}</p>
+            <div>
+              <p className="text-xs font-medium text-edge-muted mb-1">Sharpe</p>
+              <p className="text-base font-semibold text-white">{sharpe}</p>
             </div>
           </div>
 
@@ -178,7 +129,7 @@ export function StrategyCard({ strategy }: Props) {
               </svg>
               View Strategy
             </span>
-            <span className="text-2xs text-edge-dim font-mono">
+            <span className="text-sm font-medium text-edge-dim">
               {perf?.totalTrades ?? 0} trades
             </span>
           </div>

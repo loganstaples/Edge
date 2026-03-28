@@ -50,15 +50,15 @@ export function TradeHistory({ strategyId, pollInterval = 0 }: Props) {
   return (
     <div className="w-full overflow-x-auto">
       <table className="w-full border-collapse">
-        <thead>
+        <thead className="border-b border-edge-border/50">
           <tr>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Platform</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Market</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Direction</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-right">Entry</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-right">Current</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-right">P&L</th>
-            <th className="px-4 py-3 text-2xs font-mono font-normal uppercase tracking-wider text-edge-muted text-left">Status</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Platform</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Market</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Direction</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-right">Entry</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-right">Current</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-right">P&L</th>
+            <th className="px-4 py-3 text-xs font-semibold text-edge-muted text-left">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -67,50 +67,47 @@ export function TradeHistory({ strategyId, pollInterval = 0 }: Props) {
               key={trade.id}
               className="border-b border-edge-border hover:bg-white/[0.02] transition-colors"
             >
-              <td className="px-4 py-3 text-sm text-edge-text-2 capitalize">
+              <td className="px-4 py-3 text-sm text-edge-text capitalize">
                 {trade.platform}
               </td>
-              <td className="px-4 py-3 text-sm text-edge-text-2 font-mono max-w-[140px] truncate">
+              <td className="px-4 py-3 text-sm text-edge-text max-w-[140px] truncate">
                 {trade.marketId}
               </td>
               <td className="px-4 py-3">
                 <span
-                  className={`inline-flex px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm border ${
-                    trade.direction === "YES"
-                      ? "border-accent-green/30 text-accent-green"
-                      : "border-accent-red/30 text-accent-red"
-                  }`}
+                  className={`inline-flex px-2.5 py-1 text-[11px] font-medium rounded-md border ${trade.direction === "YES"
+                      ? "bg-accent-green/10 text-accent-green border-accent-green/20"
+                      : "bg-accent-red/10 text-accent-red border-accent-red/20"
+                    }`}
                 >
                   {trade.direction}
                 </span>
               </td>
-              <td className="px-4 py-3 text-right font-mono text-sm text-edge-text-2">
+              <td className="px-4 py-3 text-right font-medium text-sm text-edge-text">
                 {trade.entryPrice.toFixed(2)}
               </td>
-              <td className="px-4 py-3 text-right font-mono text-sm text-edge-text-2">
+              <td className="px-4 py-3 text-right font-medium text-sm text-edge-text">
                 {trade.currentPrice?.toFixed(2) ?? "—"}
               </td>
               <td
-                className={`px-4 py-3 text-right font-mono text-sm ${
-                  trade.pnl > 0
+                className={`px-4 py-3 text-right font-medium text-sm ${trade.pnl > 0
                     ? "text-accent-green"
                     : trade.pnl < 0
                       ? "text-accent-red"
                       : "text-edge-muted"
-                }`}
+                  }`}
               >
                 {trade.pnl > 0 ? "+" : ""}
                 {trade.pnl.toFixed(2)}
               </td>
               <td className="px-4 py-3">
                 <span
-                  className={`inline-flex px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-sm ${
-                    trade.status === "open"
-                      ? "border border-accent-blue/30 text-accent-blue"
+                  className={`inline-flex px-2.5 py-1 text-[11px] font-medium rounded-md border ${trade.status === "open"
+                      ? "bg-accent-blue/10 text-accent-blue border-accent-blue/20"
                       : trade.status === "closed"
-                        ? "bg-white/[0.06] text-edge-muted"
-                        : "border border-accent-amber/30 text-accent-amber"
-                  }`}
+                        ? "bg-white/5 text-edge-muted border-white/10"
+                        : "bg-accent-amber/10 text-accent-amber border-accent-amber/20"
+                    }`}
                 >
                   {trade.status}
                 </span>

@@ -33,11 +33,10 @@ function CategoryTabs({
           key={cat}
           type="button"
           onClick={() => onChange(cat)}
-          className={`relative px-3 py-1.5 rounded-lg text-sm transition-all cursor-pointer ${
-            active === cat
+          className={`relative px-3 py-1.5 rounded-lg text-sm transition-all cursor-pointer ${active === cat
               ? "text-white bg-white/[0.08] border border-white/[0.12]"
               : "text-edge-muted hover:text-edge-text-2 border border-transparent hover:border-edge-border"
-          }`}
+            }`}
         >
           {active === cat && (
             <motion.div
@@ -164,11 +163,8 @@ export default function MarketplacePage() {
               <h1 className="text-2xl font-semibold tracking-tight text-white">
                 Strategy Marketplace
               </h1>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-mono uppercase tracking-wider rounded-md bg-accent-green/10 text-accent-green border border-accent-green/20">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-40" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
-                </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 Live
               </span>
             </div>

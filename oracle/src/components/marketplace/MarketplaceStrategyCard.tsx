@@ -1,7 +1,6 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Sparkline } from "@/components/Sparkline";
 import type { MarketplaceStrategy } from "@/lib/marketplace-data";
 
 // ── Category color map ──────────────────────────────────────────────────
@@ -50,7 +49,6 @@ export function MarketplaceStrategyCard({ strategy, index, onView, onClone }: Pr
     border: "border-white/10",
   };
   const returnPositive = strategy.totalReturn >= 0;
-  const sparkColor = returnPositive ? "#34d399" : "#f87171";
 
   return (
     <motion.div
@@ -74,11 +72,11 @@ export function MarketplaceStrategyCard({ strategy, index, onView, onClone }: Pr
             </h3>
             <div className="flex items-center gap-2 mt-1">
               <CreatorAvatar initials={strategy.creatorAvatar} />
-              <span className="text-2xs font-mono text-edge-muted truncate">
+              <span className="text-xs font-medium text-edge-muted truncate">
                 {strategy.creator}
               </span>
-              <span className="text-edge-dim text-2xs">·</span>
-              <span className="text-2xs text-edge-dim">{strategy.publishedAgo}</span>
+              <span className="text-edge-dim text-xs">·</span>
+              <span className="text-xs text-edge-dim">{strategy.publishedAgo}</span>
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -96,46 +94,27 @@ export function MarketplaceStrategyCard({ strategy, index, onView, onClone }: Pr
           {strategy.description}
         </p>
 
-        {/* ── Hero metric: Total Return + Sparkline ─────────────── */}
-        <div className="flex items-center justify-between mb-3">
+        {/* ── Stats block ────────────────────────────────────────── */}
+        <div className="flex items-center justify-between mb-6 pt-3 border-t border-edge-border/30">
           <div>
-            <p className="text-2xs text-edge-muted uppercase tracking-wider mb-0.5">Total Return</p>
+            <p className="text-xs font-medium text-edge-muted mb-1">Total Return</p>
             <p
-              className={`text-2xl font-mono font-semibold tracking-tight ${
-                returnPositive ? "text-accent-green" : "text-accent-red"
-              }`}
+              className={`text-base font-semibold ${returnPositive ? "text-emerald-400" : "text-rose-400"
+                }`}
             >
               {returnPositive ? "+" : ""}
               {strategy.totalReturn.toFixed(1)}%
             </p>
           </div>
-          <div className={returnPositive ? "sparkline-svg" : "sparkline-svg-red"}>
-            <Sparkline
-              data={strategy.equityCurve}
-              width={100}
-              height={32}
-              color={sparkColor}
-            />
-          </div>
-        </div>
-
-        {/* ── Stats grid ────────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <div className="bg-edge-bg/80 rounded-lg px-2.5 py-2 text-center">
-            <p className="text-[10px] text-edge-dim uppercase tracking-wider">Win Rate</p>
-            <p className="text-sm font-mono font-medium text-white mt-0.5">
+          <div>
+            <p className="text-xs font-medium text-edge-muted mb-1">Win Rate</p>
+            <p className="text-base font-semibold text-white">
               {strategy.winRate}%
             </p>
           </div>
-          <div className="bg-edge-bg/80 rounded-lg px-2.5 py-2 text-center">
-            <p className="text-[10px] text-edge-dim uppercase tracking-wider">Trades</p>
-            <p className="text-sm font-mono font-medium text-white mt-0.5">
-              {strategy.totalTrades}
-            </p>
-          </div>
-          <div className="bg-edge-bg/80 rounded-lg px-2.5 py-2 text-center">
-            <p className="text-[10px] text-edge-dim uppercase tracking-wider">Avg Edge</p>
-            <p className="text-sm font-mono font-medium text-white mt-0.5">
+          <div>
+            <p className="text-xs font-medium text-edge-muted mb-1">Avg Edge</p>
+            <p className="text-base font-semibold text-white">
               {strategy.avgEdge}%
             </p>
           </div>
@@ -143,8 +122,8 @@ export function MarketplaceStrategyCard({ strategy, index, onView, onClone }: Pr
 
         {/* ── Footer: meta + clone ──────────────────────────────── */}
         <div className="flex items-center justify-between pt-3 border-t border-edge-border/50 mt-auto">
-          <div className="flex items-center gap-3 text-2xs text-edge-dim">
-            <span className="flex items-center gap-1 font-mono">
+          <div className="flex items-center gap-3 text-xs text-edge-dim font-medium">
+            <span className="flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
               </svg>
@@ -162,7 +141,7 @@ export function MarketplaceStrategyCard({ strategy, index, onView, onClone }: Pr
               e.stopPropagation();
               onClone();
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent-blue text-white text-xs font-medium hover:bg-accent-blue/80 transition-colors cursor-pointer shadow-lg shadow-accent-blue/20 hover:shadow-accent-blue/30"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white text-black text-xs font-medium hover:bg-white/90 transition-colors cursor-pointer"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
