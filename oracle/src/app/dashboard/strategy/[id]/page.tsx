@@ -25,10 +25,10 @@ const statusStyles: Record<string, { label: string; badgeClass: string; glow: st
   stopped: { label: "Stopped", badgeClass: "text-accent-red border-accent-red/30", glow: "none" },
 };
 
-function StrategyCanvas({ strategy, nodeStatuses, activeNodeIds, nodeOutputs, animateEdges }: {
+function StrategyCanvas({ strategy, nodeStatuses, highlightNodeId, nodeOutputs, animateEdges }: {
   strategy: Strategy;
   nodeStatuses: Record<string, string>;
-  activeNodeIds?: Set<string>;
+  highlightNodeId?: string | null;
   nodeOutputs?: Record<string, Record<string, any>>;
   animateEdges?: boolean;
 }) {
@@ -39,10 +39,10 @@ function StrategyCanvas({ strategy, nodeStatuses, activeNodeIds, nodeOutputs, an
     data: {
       config: n.config,
       status: nodeStatuses[n.id] ?? "idle",
-      isActive: activeNodeIds?.has(n.id) ?? false,
+      isActive: n.id === highlightNodeId,
       lastOutput: nodeOutputs?.[n.id],
     },
-  })), [strategy.nodes, nodeStatuses, activeNodeIds, nodeOutputs]);
+  })), [strategy.nodes, nodeStatuses, highlightNodeId, nodeOutputs]);
 
   const edges = useMemo(() => strategy.connections.map((c) => ({
     id: c.id,
@@ -114,21 +114,34 @@ export default function StrategyDetailPage() {
     30000
   );
 
-  // Backtest canvas node highlighting state
-  const [btActiveNodeIds, setBtActiveNodeIds] = useState<Set<string>>(new Set());
+  // Backtest canvas: highlight ONE node at a time, stepping through in order
+  const [btHighlightNode, setBtHighlightNode] = useState<string | null>(null);
   const [btNodeOutputs, setBtNodeOutputs] = useState<Record<string, Record<string, any>>>({});
-  const btClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const btTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const handleTickNodeState = useCallback((activeIds: string[], outputs: Record<string, Record<string, any>>) => {
-    setBtActiveNodeIds(new Set(activeIds));
-    setBtNodeOutputs(outputs);
-    // Auto-clear the glow after 800ms so nodes pulse per tick
-    if (btClearTimerRef.current) clearTimeout(btClearTimerRef.current);
-    if (activeIds.length > 0) {
-      btClearTimerRef.current = setTimeout(() => {
-        setBtActiveNodeIds(new Set());
-      }, 800);
+    // Clear any pending stagger timers from the previous tick
+    for (const t of btTimersRef.current) clearTimeout(t);
+    btTimersRef.current = [];
+
+    if (activeIds.length === 0) {
+      setBtHighlightNode(null);
+      setBtNodeOutputs({});
+      return;
     }
+
+    setBtNodeOutputs(outputs);
+
+    // Stagger: light up each node one at a time, ~300ms per node
+    const perNode = Math.max(250, Math.min(500, 2000 / activeIds.length));
+    activeIds.forEach((nodeId, i) => {
+      // Turn on this node
+      const onTimer = setTimeout(() => setBtHighlightNode(nodeId), i * perNode);
+      btTimersRef.current.push(onTimer);
+    });
+    // Turn off the last node after its duration
+    const offTimer = setTimeout(() => setBtHighlightNode(null), activeIds.length * perNode);
+    btTimersRef.current.push(offTimer);
   }, []);
 
   const handleAction = async (action: "deploy" | "pause" | "stop") => {
@@ -386,9 +399,9 @@ export default function StrategyDetailPage() {
                     <StrategyCanvas
                       strategy={strategyWithNodes}
                       nodeStatuses={nodeStatuses}
-                      activeNodeIds={btActiveNodeIds}
+                      highlightNodeId={btHighlightNode}
                       nodeOutputs={btNodeOutputs}
-                      animateEdges={btActiveNodeIds.size > 0}
+                      animateEdges={btHighlightNode != null}
                     />
                   </ReactFlowProvider>
                 </div>

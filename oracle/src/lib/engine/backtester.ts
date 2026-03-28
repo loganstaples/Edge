@@ -1101,8 +1101,11 @@ export async function runBacktest(
 
     // --- Build rivers from data sources at this tick ---
     const rivers: River[] = [];
+    // Track which nodes fired this tick for canvas visualization (ordered left-to-right)
+    const tickActiveNodeIds: string[] = [];
 
     for (const src of sourceNodes) {
+      const riversBefore = rivers.length;
       if (src.type === "news_feed" || src.type === "news_monitor") {
         // Feed articles published within the current tick's time window so
         // trades are distributed across the entire backtest, not clustered at
@@ -1297,15 +1300,11 @@ export async function runBacktest(
         }
         rivers.push(base);
       }
+
+      // Track this source as active if it produced any rivers
+      if (rivers.length > riversBefore) tickActiveNodeIds.push(src.id);
     }
 
-    // Track which nodes fired this tick for canvas visualization
-    const tickActiveNodeIds = new Set<string>();
-
-    // Mark source nodes as active when they produced rivers
-    for (const src of sourceNodes) {
-      if (rivers.length > 0) tickActiveNodeIds.add(src.id);
-    }
 
     // --- Process each river through downstream nodes ---
     // Track which markets have already been traded this tick to prevent duplicates
@@ -1513,7 +1512,7 @@ export async function runBacktest(
 
         // Track active nodes and their outputs for canvas visualization
         if (Object.keys(outputs).length > 0) {
-          tickActiveNodeIds.add(node.id);
+          if (!tickActiveNodeIds.includes(node.id)) tickActiveNodeIds.push(node.id);
           // Merge outputs (later rivers overwrite earlier for same node)
           tickNodeOutputs[node.id] = { ...tickNodeOutputs[node.id], ...outputs };
         }
@@ -1583,7 +1582,7 @@ export async function runBacktest(
       tradesThisTick,
       marketsScanned,
       narrations: tickNarrations.length > 0 ? tickNarrations : undefined,
-      activeNodeIds: tickActiveNodeIds.size > 0 ? [...tickActiveNodeIds] : undefined,
+      activeNodeIds: tickActiveNodeIds.length > 0 ? tickActiveNodeIds : undefined,
       nodeOutputs: Object.keys(tickNodeOutputs).length > 0 ? tickNodeOutputs : undefined,
     });
 
