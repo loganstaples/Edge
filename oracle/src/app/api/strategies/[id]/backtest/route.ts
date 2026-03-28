@@ -24,7 +24,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     ticks?: number;
     startingCapital?: number;
     period?: "1d" | "1w" | "2w" | "1m";
-    speed?: "slow" | "normal" | "fast";
+    /** Exact ms delay between ticks — client computes from speed + node count */
+    tickDelay?: number;
   } = {};
   try {
     body = await req.json();
@@ -54,7 +55,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     writer.write(encoder.encode(JSON.stringify(event) + "\n"));
   };
 
-  const tickDelay = body.speed === "slow" ? 2000 : body.speed === "fast" ? 0 : 500;
+  const tickDelay = body.tickDelay ?? 1500;
 
   (async () => {
     try {

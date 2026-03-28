@@ -72,8 +72,8 @@ interface Props {
   strategyId: string;
   nodes?: any[];
   connections?: any[];
-  /** Called on each tick with the set of active node IDs and their outputs */
-  onTickNodeState?: (activeNodeIds: string[], nodeOutputs: Record<string, Record<string, any>>) => void;
+  /** Called on each tick with node outputs and per-node animation timing (ms) */
+  onTickNodeState?: (nodeOutputs: Record<string, Record<string, any>>, perNodeMs: number) => void;
 }
 
 type Tab = "equity" | "trades" | "markets" | "log";
@@ -142,6 +142,11 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
     setResult(makeEmptyResult(strategyId, ticks, period, 1000));
     setTab("equity");
 
+    // Compute per-node animation timing — server delay matches total animation
+    const nodeCount = Math.max(propNodes?.length ?? 1, 1);
+    const perNodeMs = speed === "slow" ? 500 : speed === "fast" ? 100 : 300;
+    const tickDelay = perNodeMs * nodeCount;
+
     try {
       const res = await fetch(`/api/strategies/${strategyId}/backtest`, {
         method: "POST",
@@ -150,7 +155,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
           ticks,
           startingCapital: 1000,
           period,
-          speed,
+          tickDelay,
           ...(propNodes && propNodes.length > 0 ? { nodes: propNodes, connections: propConnections } : {}),
         }),
         signal: abort.signal,
@@ -199,19 +204,16 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
             } else {
               setCurrentNarration(null);
             }
-            // Notify parent of active node state for canvas highlighting
+            // Notify parent for canvas highlighting
             if (onTickNodeState && latestTick) {
-              onTickNodeState(
-                latestTick.activeNodeIds ?? [],
-                latestTick.nodeOutputs ?? {},
-              );
+              onTickNodeState(latestTick.nodeOutputs ?? {}, perNodeMs);
             }
           } else if (event.type === "done") {
             setResult(event.data);
             setProgress(1);
             setBacktestDone(true);
             // Clear node highlights when done
-            onTickNodeState?.([], {});
+            onTickNodeState?.({}, 0);
           } else if (event.type === "error") {
             setResult(null);
             throw new Error(event.error);

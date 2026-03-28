@@ -114,17 +114,25 @@ export default function StrategyDetailPage() {
     30000
   );
 
-  // Backtest canvas: highlight ONE node at a time, stepping through in order
+  // Backtest canvas: highlight ONE node at a time, left to right
   const [btHighlightNode, setBtHighlightNode] = useState<string | null>(null);
   const [btNodeOutputs, setBtNodeOutputs] = useState<Record<string, Record<string, any>>>({});
   const btTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const handleTickNodeState = useCallback((activeIds: string[], outputs: Record<string, Record<string, any>>) => {
-    // Clear any pending stagger timers from the previous tick
+  // All strategy node IDs sorted by x-position (left to right) — stable order
+  const orderedNodeIds = useMemo(() => {
+    if (!strategyWithNodes?.nodes?.length) return [];
+    return [...strategyWithNodes.nodes]
+      .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
+      .map((n) => n.id);
+  }, [strategyWithNodes?.nodes]);
+
+  const handleTickNodeState = useCallback((outputs: Record<string, Record<string, any>>, perNodeMs: number) => {
+    // Clear any pending timers from previous tick
     for (const t of btTimersRef.current) clearTimeout(t);
     btTimersRef.current = [];
 
-    if (activeIds.length === 0) {
+    if (perNodeMs === 0) {
       setBtHighlightNode(null);
       setBtNodeOutputs({});
       return;
@@ -132,17 +140,18 @@ export default function StrategyDetailPage() {
 
     setBtNodeOutputs(outputs);
 
-    // Stagger: light up each node one at a time, ~300ms per node
-    const perNode = Math.max(250, Math.min(500, 2000 / activeIds.length));
-    activeIds.forEach((nodeId, i) => {
-      // Turn on this node
-      const onTimer = setTimeout(() => setBtHighlightNode(nodeId), i * perNode);
-      btTimersRef.current.push(onTimer);
+    // Stagger through ALL nodes sorted by x-position, one at a time
+    orderedNodeIds.forEach((nodeId, i) => {
+      const timer = setTimeout(() => setBtHighlightNode(nodeId), i * perNodeMs);
+      btTimersRef.current.push(timer);
     });
-    // Turn off the last node after its duration
-    const offTimer = setTimeout(() => setBtHighlightNode(null), activeIds.length * perNode);
+    // Turn off the last node at the end
+    const offTimer = setTimeout(
+      () => setBtHighlightNode(null),
+      orderedNodeIds.length * perNodeMs,
+    );
     btTimersRef.current.push(offTimer);
-  }, []);
+  }, [orderedNodeIds]);
 
   const handleAction = async (action: "deploy" | "pause" | "stop") => {
     setActionLoading(true);
