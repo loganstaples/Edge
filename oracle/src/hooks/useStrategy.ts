@@ -157,6 +157,7 @@ export function useStrategy() {
     strategyId: string,
     walletAddress: string,
     strategyName: string,
+    description: string,
     walletAdapter: {
       publicKey: { toBytes(): Uint8Array };
       signTransaction: <T>(tx: T) => Promise<T>;
@@ -165,7 +166,7 @@ export function useStrategy() {
   ): Promise<string> => {
     setIsMinting(true);
     try {
-      const result = await mintStrategyNft(strategyId, walletAddress, strategyName, walletAdapter);
+      const result = await mintStrategyNft(strategyId, walletAddress, strategyName, description, walletAdapter);
 
       await fetch(`/api/strategies/${strategyId}`, {
         method: "PUT",
