@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createStream, getActiveStream, flowRateForInterval, MIN_BALANCE_USDC } from "@/lib/payments/streams";
+import { createStream, getActiveStream, flowRateForInterval } from "@/lib/payments/streams";
 import { initializeDatabase } from "@/lib/db/schema";
 
 // Ensure tables exist

@@ -444,6 +444,8 @@ function rowToStrategy(row: any): Strategy {
     authorName: row.author_name,
     ownerWallet: row.owner_wallet ?? null,
     nftMint: row.nft_mint ?? null,
+    encryptedData: row.encrypted_data ?? null,
+    zgRootHash: row.zg_root_hash ?? null,
     nodes: JSON.parse(row.nodes || "[]"),
     connections: JSON.parse(row.connections || "[]"),
     status: row.status as StrategyStatus,
@@ -480,5 +482,103 @@ function rowToSimulatedTrade(row: any): SimulatedTrade {
     openedAt: row.opened_at,
     closedAt: row.closed_at,
   };
+}
+
+// --- Backtest Jobs ---
+
+export interface BacktestJob {
+  id: string;
+  strategyId: string;
+  status: "running" | "completed" | "failed";
+  config: any;
+  nodes: any[];
+  connections: any[];
+  result: any | null;
+  error: string | null;
+  progress: number;
+  currentTick: number;
+  totalTicks: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export function createBacktestJob(
+  strategyId: string,
+  config: any,
+  nodes: any[],
+  connections: any[],
+  totalTicks: number
+): string {
+  const db = getDb();
+  const id = uuid();
+  db.prepare(`
+    INSERT INTO backtest_jobs (id, strategy_id, status, config, nodes, connections, total_ticks)
+    VALUES (?, ?, 'running', ?, ?, ?, ?)
+  `).run(id, strategyId, JSON.stringify(config), JSON.stringify(nodes), JSON.stringify(connections), totalTicks);
+  return id;
+}
+
+export function updateBacktestJobProgress(id: string, currentTick: number, progress: number, result: any): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE backtest_jobs SET current_tick = ?, progress = ?, result = ? WHERE id = ?
+  `).run(currentTick, progress, JSON.stringify(result), id);
+}
+
+export function completeBacktestJob(id: string, result: any): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE backtest_jobs SET status = 'completed', result = ?, progress = 1.0, completed_at = ? WHERE id = ?
+  `).run(JSON.stringify(result), now, id);
+}
+
+export function failBacktestJob(id: string, error: string): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE backtest_jobs SET status = 'failed', error = ?, completed_at = ? WHERE id = ?
+  `).run(error, now, id);
+}
+
+export function getBacktestJob(id: string): BacktestJob | null {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM backtest_jobs WHERE id = ?`).get(id) as any;
+  if (!row) return null;
+  return {
+    id: row.id,
+    strategyId: row.strategy_id,
+    status: row.status,
+    config: JSON.parse(row.config),
+    nodes: JSON.parse(row.nodes),
+    connections: JSON.parse(row.connections),
+    result: row.result ? JSON.parse(row.result) : null,
+    error: row.error,
+    progress: row.progress,
+    currentTick: row.current_tick,
+    totalTicks: row.total_ticks,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+  };
+}
+
+export function getBacktestJobsByStrategy(strategyId: string): BacktestJob[] {
+  const db = getDb();
+  const rows = db.prepare(`SELECT * FROM backtest_jobs WHERE strategy_id = ? ORDER BY created_at DESC LIMIT 10`).all(strategyId) as any[];
+  return rows.map((row) => ({
+    id: row.id,
+    strategyId: row.strategy_id,
+    status: row.status,
+    config: JSON.parse(row.config),
+    nodes: JSON.parse(row.nodes),
+    connections: JSON.parse(row.connections),
+    result: row.result ? JSON.parse(row.result) : null,
+    error: row.error,
+    progress: row.progress,
+    currentTick: row.current_tick,
+    totalTicks: row.total_ticks,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+  }));
 }
 

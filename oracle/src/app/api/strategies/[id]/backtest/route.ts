@@ -1,13 +1,20 @@
 // src/app/api/strategies/[id]/backtest/route.ts
+// Modified: backtest runs server-side as a background job.
+// Returns { jobId } immediately; results stored in DB.
+// Client polls /api/backtest-jobs/[jobId] for status.
+
 import { NextResponse } from "next/server";
 import { initializeDatabase } from "@/lib/db/schema";
-import { getStrategy } from "@/lib/db/queries";
+import { getStrategy, createBacktestJob, updateBacktestJobProgress, completeBacktestJob, failBacktestJob } from "@/lib/db/queries";
 import { runBacktest } from "@/lib/engine/backtester";
 
 let initialized = false;
 function ensureInit() {
   if (!initialized) { initializeDatabase(); initialized = true; }
 }
+
+// In-memory store for active backtest promises (prevents GC)
+const activeBacktests = new Map<string, Promise<void>>();
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   ensureInit();
@@ -32,62 +39,51 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Use defaults
   }
 
-  // Use nodes from request body (client-decrypted), fall back to DB (legacy/migration)
-  const strategyWithNodes = {
-    ...strategy,
-    nodes: body.nodes && body.nodes.length > 0 ? body.nodes : strategy.nodes,
-    connections: body.connections && body.connections.length > 0 ? body.connections : strategy.connections,
-  };
+  const nodes = body.nodes && body.nodes.length > 0 ? body.nodes : strategy.nodes;
+  const connections = body.connections && body.connections.length > 0 ? body.connections : strategy.connections;
 
-  if (strategyWithNodes.nodes.length === 0) {
+  if (nodes.length === 0) {
     return NextResponse.json(
       { error: "No strategy nodes provided. Decrypt your strategy and include nodes in the request." },
       { status: 400 },
     );
   }
 
-  const stream = new TransformStream();
-  const writer = stream.writable.getWriter();
-  const encoder = new TextEncoder();
+  const ticks = body.ticks ?? 60;
+  const startingCapital = body.startingCapital ?? 1000;
+  const period = body.period ?? "1w";
+  const config = { ticks, startingCapital, period };
 
-  const write = (event: Record<string, unknown>) => {
-    writer.write(encoder.encode(JSON.stringify(event) + "\n"));
-  };
+  // Create background job in DB
+  const jobId = createBacktestJob(id, config, nodes, connections, ticks);
 
-  // Per-node yield: just enough for the client to render the highlight.
-  // Real processing time adds on top naturally (AI calls, etc.).
-  const nodeDelay = body.speed === "slow" ? 200 : body.speed === "fast" ? 0 : 80;
+  const strategyWithNodes = { ...strategy, nodes, connections };
 
-  (async () => {
+  // Fire-and-forget: run backtest in background, store results in DB
+  const backtestPromise = (async () => {
     try {
       await runBacktest(
         strategyWithNodes,
-        {
-          ticks: body.ticks ?? 60,
-          startingCapital: body.startingCapital ?? 1000,
-          period: body.period ?? "1w",
-        },
+        config,
         async (event) => {
-          write(event);
-          // Yield after node_start so the client can render before the next event.
-          // No delay on tick events — no dead time at the end.
-          if (event.type === "node_start" && nodeDelay > 0) {
-            await new Promise((r) => setTimeout(r, nodeDelay));
+          if (event.type === "tick") {
+            // Update progress in DB
+            updateBacktestJobProgress(jobId, event.tick, (event.tick + 1) / event.totalTicks, event.data);
+          } else if (event.type === "done") {
+            completeBacktestJob(jobId, event.data);
           }
+          // No delay needed — no client stream to sync with
         },
       );
     } catch (error) {
-      write({ type: "error", error: `Backtest failed: ${String(error)}` });
+      failBacktestJob(jobId, String(error));
     } finally {
-      writer.close();
+      activeBacktests.delete(jobId);
     }
   })();
 
-  return new Response(stream.readable, {
-    headers: {
-      "Content-Type": "application/x-ndjson",
-      "Cache-Control": "no-cache",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
+  // Keep reference to prevent GC
+  activeBacktests.set(jobId, backtestPromise);
+
+  return NextResponse.json({ jobId });
 }

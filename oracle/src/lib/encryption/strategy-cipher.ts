@@ -22,7 +22,7 @@ export async function deriveEncryptionKey(
   const { signature } = await signMessage(message);
 
   // SHA-256 the ed25519 signature → 32 bytes → AES-256 key
-  const keyMaterial = await crypto.subtle.digest("SHA-256", signature);
+  const keyMaterial = await crypto.subtle.digest("SHA-256", new Uint8Array(signature));
 
   return crypto.subtle.importKey(
     "raw",
@@ -55,7 +55,7 @@ export async function encryptStrategy(
   combined.set(iv);
   combined.set(new Uint8Array(ciphertext), iv.length);
 
-  return btoa(String.fromCharCode(...combined));
+  return btoa(String.fromCharCode(...Array.from(combined)));
 }
 
 /**

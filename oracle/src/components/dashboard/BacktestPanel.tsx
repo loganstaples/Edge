@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   AreaChart,
   Area,
@@ -15,6 +15,7 @@ import { TickNarrationBanner } from "./TickNarrationBanner";
 import { ExecutionStepLog } from "./ExecutionStepLog";
 import { BacktestSummaryCard } from "./BacktestSummaryCard";
 import type { TickNarration } from "@/lib/engine/backtester";
+import { BACKTEST_TICK_COST_USDC } from "@/lib/payments/constants";
 
 interface BacktestTrade {
   tick: number;
@@ -74,6 +75,8 @@ interface Props {
   connections?: any[];
   /** Called to highlight a node on the canvas during backtest (null = clear) */
   onNodeHighlight?: (nodeId: string | null) => void;
+  /** Called each tick with the cost amount — parent wires this to payment stream */
+  onTickPayment?: (amount: number) => void;
 }
 
 type Tab = "equity" | "trades" | "markets" | "log";
@@ -110,7 +113,7 @@ function makeEmptyResult(strategyId: string, ticks: number, period: string, star
   };
 }
 
-export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onNodeHighlight }: Props) {
+export function BacktestPanel({ strategyId, nodes: propNodes, connections: propConnections, onNodeHighlight, onTickPayment }: Props) {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,16 +127,82 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
   const [currentTick, setCurrentTick] = useState(0);
   const [totalTicks, setTotalTicks] = useState(0);
   const [backtestDone, setBacktestDone] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastChargedTickRef = useRef(0);
+
+  // Poll for backtest job results
+  useEffect(() => {
+    if (!jobId || backtestDone) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/backtest-jobs/${jobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+
+        if (job.result) {
+          setResult(job.result);
+          setProgress(job.progress);
+          setCurrentTick(job.currentTick);
+          setTotalTicks(job.totalTicks);
+          setStreamPhase(`Tick ${job.currentTick + 1} / ${job.totalTicks}`);
+
+          // Charge for new ticks since last poll
+          if (onTickPayment && job.currentTick > lastChargedTickRef.current) {
+            const newTicks = job.currentTick - lastChargedTickRef.current;
+            onTickPayment(newTicks * BACKTEST_TICK_COST_USDC);
+            lastChargedTickRef.current = job.currentTick;
+          }
+
+          // Extract narration from latest tick
+          const tickData = job.result?.ticks;
+          if (tickData?.length > 0) {
+            const latestTick = tickData[tickData.length - 1];
+            if (latestTick?.narrations?.length > 0) {
+              const narrs = latestTick.narrations as TickNarration[];
+              const best = narrs.find((n: TickNarration) => n.tradeAction)
+                ?? narrs.reduce((a: TickNarration, b: TickNarration) =>
+                  Math.abs(b.edgePct ?? 0) > Math.abs(a.edgePct ?? 0) ? b : a);
+              setCurrentNarration(best);
+            }
+          }
+        }
+
+        if (job.status === "completed") {
+          setResult(job.result);
+          setProgress(1);
+          setBacktestDone(true);
+          setLoading(false);
+          setStreamPhase(null);
+          onNodeHighlight?.(null);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        } else if (job.status === "failed") {
+          setError(job.error || "Backtest failed");
+          setLoading(false);
+          setStreamPhase(null);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        }
+      } catch {
+        // Silently retry
+      }
+    };
+
+    // Poll every 2 seconds
+    poll();
+    pollingRef.current = setInterval(poll, 2000);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [jobId, backtestDone, onNodeHighlight]);
 
   const runBacktest = useCallback(async () => {
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
+    if (pollingRef.current) clearInterval(pollingRef.current);
 
     setLoading(true);
     setError(null);
-    setStreamPhase("Connecting...");
+    setStreamPhase("Starting backtest...");
     setProgress(0);
     setCurrentNarration(null);
     setCurrentTick(0);
@@ -141,6 +210,7 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
     setBacktestDone(false);
     setResult(makeEmptyResult(strategyId, ticks, period, 1000));
     setTab("equity");
+    setJobId(null);
 
     try {
       const res = await fetch(`/api/strategies/${strategyId}/backtest`, {
@@ -153,7 +223,6 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
           speed,
           ...(propNodes && propNodes.length > 0 ? { nodes: propNodes, connections: propConnections } : {}),
         }),
-        signal: abort.signal,
       });
 
       if (!res.ok) {
@@ -161,69 +230,16 @@ export function BacktestPanel({ strategyId, nodes: propNodes, connections: propC
         throw new Error(body.error || "Backtest failed");
       }
 
-      if (!res.body) throw new Error("No response body");
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop()!;
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let event: any;
-          try { event = JSON.parse(line); } catch { continue; }
-
-          if (event.type === "setup") {
-            setStreamPhase(event.message);
-          } else if (event.type === "node_start") {
-            // Highlight this node on the canvas — tracks real execution
-            onNodeHighlight?.(event.nodeId);
-          } else if (event.type === "tick") {
-            setResult(event.data);
-            setProgress((event.tick + 1) / event.totalTicks);
-            setStreamPhase(`Tick ${event.tick + 1} / ${event.totalTicks}`);
-            setCurrentTick(event.tick);
-            setTotalTicks(event.totalTicks);
-            // Clear highlight between ticks
-            onNodeHighlight?.(null);
-            // Extract narration from the latest tick
-            const latestTick = event.data?.ticks?.[event.data.ticks.length - 1];
-            if (latestTick?.narrations?.length > 0) {
-              const narrs = latestTick.narrations as TickNarration[];
-              const best = narrs.find((n: TickNarration) => n.tradeAction)
-                ?? narrs.reduce((a: TickNarration, b: TickNarration) =>
-                  Math.abs(b.edgePct ?? 0) > Math.abs(a.edgePct ?? 0) ? b : a);
-              setCurrentNarration(best);
-            } else {
-              setCurrentNarration(null);
-            }
-          } else if (event.type === "done") {
-            setResult(event.data);
-            setProgress(1);
-            setBacktestDone(true);
-            onNodeHighlight?.(null);
-          } else if (event.type === "error") {
-            setResult(null);
-            throw new Error(event.error);
-          }
-        }
-      }
+      const data = await res.json();
+      setJobId(data.jobId);
+      setStreamPhase("Backtest running...");
     } catch (e) {
-      if ((e as Error).name === "AbortError") return;
       setError(e instanceof Error ? e.message : String(e));
-      if (!result?.ticks?.length) setResult(null);
-    } finally {
       setLoading(false);
       setStreamPhase(null);
-      abortRef.current = null;
+      setResult(null);
     }
-  }, [strategyId, ticks, period, speed, propNodes, propConnections, onNodeHighlight]);
+  }, [strategyId, ticks, period, speed, propNodes, propConnections]);
 
   // --- Launch UI ---
   if (!result && !loading) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import {} from "react";
 import { TICK_COST_USDC, MIN_BALANCE_USDC } from "@/lib/payments/constants";
 
 interface PaymentModalProps {

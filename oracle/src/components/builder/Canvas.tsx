@@ -32,7 +32,6 @@ import { useWallet } from "@/hooks/useWallet";
 import { usePaymentStream } from "@/hooks/usePaymentStream";
 import { MiniActivityFeed } from "./MiniActivityFeed";
 import { PaymentModal } from "./PaymentModal";
-import { StreamIndicator } from "./StreamIndicator";
 import { TICK_COST_USDC } from "@/lib/payments/constants";
 
 type StrategyStatus = "draft" | "running" | "paused" | "stopped";
@@ -427,13 +426,13 @@ function CanvasInner() {
     setShowPaymentModal(false);
     // Auto-save before deploying so strategy.id is set
     await handleSave();
-    // Start payment stream
+    // Start payment stream with on-chain USDC transfers
     if (wallet.address && strategy?.id) {
-      await paymentStream.startStream(strategy.id, wallet.address, pollingInterval);
+      await paymentStream.startStream(strategy.id, wallet.address, pollingInterval, wallet.signAndSendTransaction);
     }
     await deploy(wallet.address);
     setStrategyStatus("running");
-  }, [deploy, handleSave, wallet.address, strategy?.id, paymentStream, pollingInterval]);
+  }, [deploy, handleSave, wallet.address, strategy?.id, paymentStream, pollingInterval, wallet.signAndSendTransaction]);
 
   const handlePause = useCallback(async () => {
     await paymentStream.pauseStream();

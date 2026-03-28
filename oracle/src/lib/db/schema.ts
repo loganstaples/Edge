@@ -113,6 +113,25 @@ export function initializeDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_execution_log_strategy ON execution_log(strategy_id);
     CREATE INDEX IF NOT EXISTS idx_simulated_trades_strategy ON simulated_trades(strategy_id);
 
+    CREATE TABLE IF NOT EXISTS backtest_jobs (
+      id TEXT PRIMARY KEY,
+      strategy_id TEXT REFERENCES strategies(id),
+      status TEXT DEFAULT 'running',
+      config TEXT NOT NULL,
+      nodes TEXT NOT NULL,
+      connections TEXT NOT NULL,
+      result TEXT,
+      error TEXT,
+      progress REAL DEFAULT 0,
+      current_tick INTEGER DEFAULT 0,
+      total_ticks INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_backtest_jobs_strategy ON backtest_jobs(strategy_id);
+    CREATE INDEX IF NOT EXISTS idx_backtest_jobs_status ON backtest_jobs(status);
+
     CREATE TABLE IF NOT EXISTS payment_streams (
       id TEXT PRIMARY KEY,
       strategy_id TEXT REFERENCES strategies(id),

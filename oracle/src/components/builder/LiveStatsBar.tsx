@@ -31,7 +31,7 @@ function formatPct(v: number): string {
 
 /** Tiny inline SVG sparkline for equity curve */
 function EquityChart({ data, isExecuting }: { data: number[]; isExecuting: boolean }) {
-  const { path, areaPath, viewBox, min, max, lastY, pctChange } = useMemo(() => {
+  const { path, areaPath, viewBox, min, max, lastY, pctChange: _pctChange } = useMemo(() => {
     if (data.length < 2) {
       return { path: "", areaPath: "", viewBox: "0 0 400 120", min: 0, max: 0, lastY: 60, pctChange: 0 };
     }
