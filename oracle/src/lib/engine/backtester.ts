@@ -579,13 +579,17 @@ async function _runReactiveSource(
   }
 
   const maxResults = node.config.max_results ?? 5;
-  const rawKeywords = searchTerms.toLowerCase().split(/\s+/).filter(Boolean);
+  // AI often returns comma-separated phrases — use the first 2 phrases only
+  const phrases = searchTerms.split(",").map((p) => p.trim()).filter(Boolean).slice(0, 2);
+  const condensed = phrases.join(" ").toLowerCase();
+  const rawKeywords = condensed.split(/\s+/).filter(Boolean);
   // Filter out stop words to prevent overly broad matching
   const STOP_WORDS = new Set(["the", "of", "in", "a", "an", "to", "for", "and", "or", "is", "it", "on", "at", "by", "be", "will", "has", "have", "can", "do", "does"]);
   const effectiveKeywords = rawKeywords.filter((kw) => kw.length > 2 && !STOP_WORDS.has(kw));
-  const keywords = effectiveKeywords.length > 0 ? effectiveKeywords : rawKeywords;
-  // Full phrase for substring matching (catches "artificial intelligence" in one go)
-  const fullPhrase = keywords.join(" ");
+  // Cap at 6 keywords to keep matching practical
+  const keywords = (effectiveKeywords.length > 0 ? effectiveKeywords : rawKeywords).slice(0, 6);
+  // Full phrase for substring matching
+  const fullPhrase = phrases[0]?.toLowerCase() ?? keywords.join(" ");
 
   // Scoring: check full-phrase substring match first, then require at least
   // 1/3 of individual keywords (min 1). This balances specificity with recall.
@@ -1222,11 +1226,6 @@ export async function runBacktest(
     // from multiple news articles pointing to the same market.
     const tradedThisTick = new Set<string>();
 
-    if (t === 0) {
-      console.log(`  [bt debug] Tick 0: ${rivers.length} rivers, ${sourceNodes.length} source nodes, ${articles.length} total articles`);
-      if (rivers.length > 0) console.log(`  [bt debug] First river keys: ${Object.keys(rivers[0]).join(", ")}`);
-    }
-
     for (const river of rivers) {
       const outputMap: Record<string, Record<string, any>> = {};
       outputMap["__source__"] = river;
@@ -1258,31 +1257,43 @@ export async function runBacktest(
 
         // --- Reactive data sources: search markets using upstream context ---
         if (node.category === "data") {
-          if (t <= 1) console.log(`  [bt debug] Tick ${t} reactive ${node.id} (${node.type}): search_terms="${builtRiver.search_terms || ""}" pool_size=${polymarketSearchPool.length}`);
           outputs = await _runReactiveSource(
             node, builtRiver, tickTs, startTs, endTs,
             polymarketSearchPool, geminiSearchPool, historyCache, allMarkets,
           );
-          if (t <= 1) console.log(`  [bt debug] Tick ${t} reactive result: ${outputs._item_count ?? 0} items, event_title="${(outputs.event_title || "").slice(0, 50)}"`);
-
         // --- AI nodes: use cached real Claude calls ---
         } else if (node.category === "ai") {
           switch (node.type) {
             case "ai_analyst":
             case "ai_estimate": {
-              const title = builtRiver.event_title || builtRiver.headline || "";
-              const result = title ? await cachedAIEstimate(title) : { ai_probability: null, ai_confidence: "low", ai_reasoning: "No context", key_factors: [] };
-              if (t <= 1) console.log(`  [bt debug] Tick ${t} ai_analyst ${node.id}: title="${(title || "").slice(0, 50)}" → search_terms="${result.search_terms || ""}" prob=${result.ai_probability}`);
-              if (node.type === "ai_analyst") {
-                outputs = {
-                  analyst_probability: result.ai_probability,
-                  analyst_confidence: result.ai_confidence,
-                  analyst_direction: result.ai_probability != null ? (result.ai_probability > 0.55 ? "bullish" : result.ai_probability < 0.45 ? "bearish" : "neutral") : "neutral",
-                  analyst_reasoning: result.ai_reasoning,
-                  search_terms: result.search_terms,
-                };
+              // If the river comes from a news/text source (has headline but no
+              // market event_title), use the real runAINode so the node's custom
+              // instruction is used (e.g. "Output search_terms for markets").
+              // cachedAIEstimate is for market event titles only — it asks Claude
+              // to estimate probability of an event, which doesn't work for news.
+              const hasMarketContext = !!builtRiver.event_title;
+              if (!hasMarketContext) {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const { runAINode: realAIRunner } = require("./node-runners/ai-nodes");
+                  outputs = await realAIRunner(node, builtRiver);
+                } catch {
+                  outputs = { analyst_probability: 0.5, analyst_confidence: "low", analyst_direction: "neutral", analyst_reasoning: "AI call failed", search_terms: "" };
+                }
               } else {
-                outputs = result;
+                const title = builtRiver.event_title;
+                const result = await cachedAIEstimate(title);
+                if (node.type === "ai_analyst") {
+                  outputs = {
+                    analyst_probability: result.ai_probability,
+                    analyst_confidence: result.ai_confidence,
+                    analyst_direction: result.ai_probability != null ? (result.ai_probability > 0.55 ? "bullish" : result.ai_probability < 0.45 ? "bearish" : "neutral") : "neutral",
+                    analyst_reasoning: result.ai_reasoning,
+                    search_terms: result.search_terms,
+                  };
+                } else {
+                  outputs = result;
+                }
               }
               break;
             }

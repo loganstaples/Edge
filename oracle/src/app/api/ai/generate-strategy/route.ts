@@ -30,7 +30,7 @@ WATCH (data sources, category "data"):
 THINK (AI/analysis, category "ai"):
 - ai_analyst: Config: { instruction: string, model: "claude-haiku"|"claude-sonnet"|"claude-opus", depth: "fast"|"balanced"|"thorough", structured: boolean }. Outputs: analyst_probability (0-1), analyst_confidence, analyst_direction, analyst_reasoning, analyst_market_title, search_terms. NOTE: The AI analyst ONLY analyzes data — it does NOT search for markets. To find markets, place a reactive market feed (polymarket_feed, gemini_markets_feed) downstream and feed it the analyst's search_terms output. When available_markets are in the river from an upstream feed, the analyst uses them to inform its probability estimate.
 - sentiment_scanner: Config: { domain: "general"|"crypto"|"political"|"financial"|"sports", aggregation: "per_item"|"5m"|"15m"|"1h" }. Outputs: scanner_sentiment_score (-100 to 100), scanner_magnitude, scanner_volume_count. NOTE: Analyzes TEXT for emotional tone. Only connect to text-producing sources (news_monitor, twitter_monitor). Do NOT connect market feeds (polymarket_feed, gemini_markets_feed) — their event titles are neutral questions with no sentiment to extract.
-- consensus: Config: { consensus_mode: "weighted_avg"|"majority", input_count: 2-5, weights: number[] }. Handles: inputs input_1 through input_5. Outputs: consensus_probability, consensus_confidence, consensus_direction, consensus_disagreement. NOTE: Averages probability values (0-1). ALL inputs must produce probability-like values. Do NOT mix sentiment_scanner output with ai_analyst output — sentiment scores are NOT probabilities. For multiple probability sources, use multiple ai_analyst nodes with different models/configs.
+- consensus: Config: { consensus_mode: "weighted_avg"|"majority", input_count: 2-5, weights: number[] (0-100 scale, e.g. [40, 60] for 40%/60%) }. Handles: inputs input_1 through input_5. Outputs: consensus_probability, consensus_confidence, consensus_direction, consensus_disagreement. NOTE: Averages probability values (0-1). ALL inputs must produce probability-like values. Do NOT mix sentiment_scanner output with ai_analyst output — sentiment scores are NOT probabilities. For multiple probability sources, use multiple ai_analyst nodes with different models/configs.
 - history_tracker: Config: { track_field: string, depth: 5|10|25|50|100, time_window: "5m"|"15m"|"1h"|"4h"|"24h"|"7d" }. Outputs: history_current, history_values, history_trend, history_avg, history_streak, history_rate_of_change
 - formula: Config: { formula: string }. Outputs: formula_result, formula_error
 
@@ -494,7 +494,7 @@ function enforceStrategyRules(strategy: { nodes: any[]; connections: any[] }, _u
  */
 function autoLayoutStrategy(strategy: { nodes: any[]; connections: any[] }) {
   const COL_GAP_X = 350;
-  const NODE_GAP_Y = 250;
+  const NODE_GAP_Y = 320;
   const MAX_PER_COL = 3; // if a column has more than this, promote nodes forward
 
   // Build adjacency
