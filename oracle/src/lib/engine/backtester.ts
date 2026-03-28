@@ -69,6 +69,10 @@ export interface BacktestTick {
   tradesThisTick: number;
   marketsScanned: number;
   narrations?: TickNarration[];
+  /** IDs of nodes that produced output during this tick */
+  activeNodeIds?: string[];
+  /** Per-node output maps for driving canvas node displays */
+  nodeOutputs?: Record<string, Record<string, any>>;
 }
 
 export interface BacktestMetrics {
@@ -1295,11 +1299,20 @@ export async function runBacktest(
       }
     }
 
+    // Track which nodes fired this tick for canvas visualization
+    const tickActiveNodeIds = new Set<string>();
+
+    // Mark source nodes as active when they produced rivers
+    for (const src of sourceNodes) {
+      if (rivers.length > 0) tickActiveNodeIds.add(src.id);
+    }
+
     // --- Process each river through downstream nodes ---
     // Track which markets have already been traded this tick to prevent duplicates
     // from multiple news articles pointing to the same market.
     const tradedThisTick = new Set<string>();
     const tickNarrations: TickNarration[] = [];
+    const tickNodeOutputs: Record<string, Record<string, any>> = {};
 
     for (const river of rivers) {
       const outputMap: Record<string, Record<string, any>> = {};
@@ -1497,6 +1510,13 @@ export async function runBacktest(
         // Don't leak _active_handle through non-router nodes (same fix as live executor)
         if (!outputs._active_handle) delete accumulated._active_handle;
         outputMap[node.id] = accumulated;
+
+        // Track active nodes and their outputs for canvas visualization
+        if (Object.keys(outputs).length > 0) {
+          tickActiveNodeIds.add(node.id);
+          // Merge outputs (later rivers overwrite earlier for same node)
+          tickNodeOutputs[node.id] = { ...tickNodeOutputs[node.id], ...outputs };
+        }
       }
 
       // --- Collect narration from this river's outputs ---
@@ -1563,6 +1583,8 @@ export async function runBacktest(
       tradesThisTick,
       marketsScanned,
       narrations: tickNarrations.length > 0 ? tickNarrations : undefined,
+      activeNodeIds: tickActiveNodeIds.size > 0 ? [...tickActiveNodeIds] : undefined,
+      nodeOutputs: Object.keys(tickNodeOutputs).length > 0 ? tickNodeOutputs : undefined,
     });
 
     if (onProgress) {
