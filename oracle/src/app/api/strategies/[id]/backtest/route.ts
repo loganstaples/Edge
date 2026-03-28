@@ -24,8 +24,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     ticks?: number;
     startingCapital?: number;
     period?: "1d" | "1w" | "2w" | "1m";
-    /** Exact ms delay between ticks — client computes from speed + node count */
-    tickDelay?: number;
+    speed?: "slow" | "normal" | "fast";
   } = {};
   try {
     body = await req.json();
@@ -55,7 +54,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     writer.write(encoder.encode(JSON.stringify(event) + "\n"));
   };
 
-  const tickDelay = body.tickDelay ?? 1500;
+  // Per-node yield: just enough for the client to render the highlight.
+  // Real processing time adds on top naturally (AI calls, etc.).
+  const nodeDelay = body.speed === "slow" ? 200 : body.speed === "fast" ? 0 : 80;
 
   (async () => {
     try {
@@ -68,8 +69,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         },
         async (event) => {
           write(event);
-          if (event.type === "tick" && tickDelay > 0) {
-            await new Promise((r) => setTimeout(r, tickDelay));
+          // Yield after node_start so the client can render before the next event.
+          // No delay on tick events — no dead time at the end.
+          if (event.type === "node_start" && nodeDelay > 0) {
+            await new Promise((r) => setTimeout(r, nodeDelay));
           }
         },
       );
