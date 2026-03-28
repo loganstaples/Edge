@@ -24,30 +24,27 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
   }
 
-  const isOwner = walletAddress && strategy.ownerWallet === walletAddress;
+  const isOwner = strategy.ownerWallet === walletAddress;
 
   // Private strategies are invisible to non-owners
   if (!strategy.isPublic && !isOwner) {
     return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
   }
 
-  // Owner gets metadata + encrypted data (never plaintext nodes over the wire)
-  if (isOwner) {
-    return NextResponse.json({
-      ...strategy,
-      nodes: [],
-      connections: [],
-      // Client will decrypt encryptedData to recover nodes/connections
-    });
-  }
-
-  // Non-owner viewing a public strategy — redact everything sensitive
-  return NextResponse.json({
+  // Strip plaintext logic — clients use encrypted data
+  const response: any = {
     ...strategy,
     nodes: [],
     connections: [],
-    encryptedData: null,
-  });
+  };
+
+  // Only owner gets encrypted data
+  if (!isOwner) {
+    response.encryptedData = null;
+    response.zgRootHash = null;
+  }
+
+  return NextResponse.json(response);
 }
 
 /**

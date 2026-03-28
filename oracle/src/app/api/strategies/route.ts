@@ -22,19 +22,25 @@ export async function GET(req: Request) {
   if (walletAddress) {
     const visible = all
       .filter((s) => s.ownerWallet === walletAddress || s.isPublic)
-      .map((s) => {
-        // Never send plaintext nodes in list view — owner decrypts via individual load
-        if (s.ownerWallet === walletAddress) {
-          return { ...s, nodes: [], connections: [] };
-        }
-        return { ...s, nodes: [], connections: [], encryptedData: null };
-      });
+      .map((s) => ({
+        ...s,
+        nodes: [],
+        connections: [],
+        encryptedData: s.ownerWallet === walletAddress ? s.encryptedData : undefined,
+        zgRootHash: s.ownerWallet === walletAddress ? s.zgRootHash : undefined,
+      }));
     return NextResponse.json(visible);
   }
 
   const publicOnly = all
     .filter((s) => s.isPublic)
-    .map((s) => ({ ...s, nodes: [], connections: [] }));
+    .map((s) => ({
+      ...s,
+      nodes: [],
+      connections: [],
+      encryptedData: undefined,
+      zgRootHash: undefined,
+    }));
   return NextResponse.json(publicOnly);
 }
 
