@@ -1,3 +1,4 @@
+// src/app/api/strategies/[id]/backtest/route.ts
 import { NextResponse } from "next/server";
 import { initializeDatabase } from "@/lib/db/schema";
 import { getStrategy } from "@/lib/db/queries";
@@ -18,6 +19,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   let body: {
+    nodes?: any[];
+    connections?: any[];
     ticks?: number;
     startingCapital?: number;
     period?: "1d" | "1w" | "2w" | "1m";
@@ -28,8 +31,22 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Use defaults
   }
 
+  // Use nodes from request body (client-decrypted), fall back to DB (legacy/migration)
+  const strategyWithNodes = {
+    ...strategy,
+    nodes: body.nodes && body.nodes.length > 0 ? body.nodes : strategy.nodes,
+    connections: body.connections && body.connections.length > 0 ? body.connections : strategy.connections,
+  };
+
+  if (strategyWithNodes.nodes.length === 0) {
+    return NextResponse.json(
+      { error: "No strategy nodes provided. Decrypt your strategy and include nodes in the request." },
+      { status: 400 },
+    );
+  }
+
   try {
-    const result = await runBacktest(strategy, {
+    const result = await runBacktest(strategyWithNodes, {
       ticks: body.ticks ?? 60,
       startingCapital: body.startingCapital ?? 1000,
       period: body.period ?? "1w",
