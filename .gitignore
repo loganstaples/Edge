@@ -23,15 +23,6 @@ yarn-error.log*
 # Vercel
 .vercel/
 
-# Reference projects (not part of the app)
-frontend_reference/
-
 # Test scripts
 oracle/test-*.ts
-
-# Superpowers/tooling artifacts
-docs/superpowers/
-oracle/docs/
-
-# Claude Code worktrees
-.claude/
+.gstack/
