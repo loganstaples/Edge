@@ -8,6 +8,12 @@ Edge is a no-code strategy builder for prediction markets like Polymarket and Ge
 
 ▶ **[Watch the full demo (66s, MP4)](docs/demo.mp4)**
 
+
+
+https://github.com/user-attachments/assets/955a8357-78bc-4dcd-9681-eb8f18104fc1
+
+
+
 *Solo hackathon project, built over one weekend in March 2026.*
 
 ---
